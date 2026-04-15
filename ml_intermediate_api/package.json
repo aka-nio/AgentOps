@@ -1,0 +1,34 @@
+{
+  "name": "ml_intermediate_api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "nodemon --watch src --ext ts --exec tsx src/server.ts",
+    "start:prod": "node dist/server.js",
+    "build": "tsc -p tsconfig.json",
+    "type-check": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "docker:up:postgres": "docker compose up -d postgres",
+    "docker:up": "docker compose up -d --build",
+    "docker:test:smoke": "tsx src/scripts/docker-crud-smoke.ts",
+    "docker:down": "docker compose down",
+    "dev-token": "tsx src/scripts/dev-token.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.7.0",
+    "fastify": "^5.2.1",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.13.3",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.9",
+    "@types/node": "^22.13.10",
+    "nodemon": "^3.1.10",
+    "prisma": "^6.7.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8"
+  }
+}

@@ -1,0 +1,32 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ml_intermediate_api_app
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ml_intermediate_api?schema=public
+      PORT: 3000
+      AUTH_STATUS: off
+      JWT_SECRET: dev_jwt_secret_change_me
+    ports:
+      - "3000:3000"
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:16
+    container_name: ml_intermediate_api_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ml_intermediate_api
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
