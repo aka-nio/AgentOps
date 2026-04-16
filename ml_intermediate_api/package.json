@@ -13,7 +13,8 @@
     "docker:up": "docker compose up -d --build",
     "docker:test:smoke": "tsx src/scripts/docker-crud-smoke.ts",
     "docker:down": "docker compose down",
-    "dev-token": "tsx src/scripts/dev-token.ts"
+    "dev-token": "tsx src/scripts/dev-token.ts",
+    "ml-api-introspect": "tsx src/scripts/ml-api-introspect.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.7.0",

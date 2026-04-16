@@ -25,6 +25,7 @@ npm run start
 - `npm run docker:test:smoke`: run Docker CRUD smoke verification
 - `npm run docker:down`: stop local containers
 - `npm run dev-token`: print development JWT token
+- `npm run ml-api-introspect`: crawl Mercado Libre API metadata via `OPTIONS` and write `docs/mercado_livre/api_introspection.json` (configurable via env vars in `src/scripts/ml-api-introspect.ts`)
 
 ## Documentation
 
