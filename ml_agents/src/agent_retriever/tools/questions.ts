@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { tool } from "@langchain/core/tools";
-import { env } from "../config/env.js";
-import { MercadoLivreQuestionsResponseSchema, MercadoLivreQuestionStatusSchema } from "./types.js";
+import { env } from "../../config/env.js";
+import { MercadoLivreQuestionsResponseSchema, MercadoLivreQuestionStatusSchema } from "../types.js";
 
 const FetchQuestionsInputSchema = z.object({
   status: MercadoLivreQuestionStatusSchema.default("UNANSWERED").describe(
@@ -33,4 +33,3 @@ export const fetch_ml_questions = tool(
     schema: FetchQuestionsInputSchema
   }
 );
-

@@ -1,5 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { z } from "zod";
+import { runAgentQuestionsWithResult } from "./agent_questions/agent.js";
+import { PreparedQuestionsPayloadSchema } from "./agent_questions/ag_questions_type.js";
 import { env } from "./config/env.js";
 import { agentGraph } from "./graph/agent-graph.js";
 import { closeMongoClient } from "./lib/mongodb.js";
@@ -12,6 +14,14 @@ const invokeSchema = z.object({
 const searchSchema = z.object({
   query: z.string().min(1),
   k: z.number().int().positive().max(20).default(3)
+});
+
+const agentQuestionsRunSchema = z.object({
+  limit: z.number().int().positive().max(25).optional(),
+  dryRun: z.boolean().optional(),
+  persist: z.boolean().optional(),
+  /** When omitted, the server loads `src/agent_retriever/outputs/unanswered-questions.json` relative to the agent package (may be missing until the retriever has run). */
+  payload: PreparedQuestionsPayloadSchema.optional()
 });
 
 const parseJsonBody = async <T>(
@@ -61,6 +71,17 @@ const server = createServer(async (req, res) => {
       return sendJson(res, 200, { matches: docs });
     }
 
+    if (req.method === "POST" && req.url === "/agent-questions/run") {
+      const body = await parseJsonBody(req, agentQuestionsRunSchema);
+      const result = await runAgentQuestionsWithResult({
+        limit: body.limit,
+        dryRun: body.dryRun ?? false,
+        persist: body.persist,
+        prepared: body.payload
+      });
+      return sendJson(res, 200, result);
+    }
+
     return sendJson(res, 404, { error: "Route not found." });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -72,6 +93,13 @@ const server = createServer(async (req, res) => {
 
     if (error instanceof SyntaxError) {
       return sendJson(res, 400, { error: "Body must be valid JSON." });
+    }
+
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      return sendJson(res, 400, {
+        error: "Questions payload not found. POST a `payload` from the retriever, or run the retriever to write unanswered questions to disk."
+      });
     }
 
     console.error("Unhandled request error:", error);

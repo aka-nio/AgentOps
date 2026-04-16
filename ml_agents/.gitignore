@@ -47,3 +47,7 @@ out/
 Thumbs.db
 .idea/
 .vscode/
+
+# Agent generated outputs
+src/agent_retriever/outputs/
+src/agent_questions/outputs/

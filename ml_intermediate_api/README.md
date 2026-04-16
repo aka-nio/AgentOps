@@ -31,7 +31,7 @@ npm run start
 - API docs index: `docs/API/README.md`
 - External auth endpoint: `docs/API/endpoints/external-auth.md`
 - Mercado Livre questions endpoint: `docs/API/endpoints/mercado-livre-questions.md`
- - Docker smoke testing: `docs/API/testing/docker-smoke.md`
+- Mercado Livre item endpoint: `docs/API/endpoints/mercado-livre-items.md`
 
 ## Prisma version and constraints
 

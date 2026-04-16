@@ -13,6 +13,7 @@ Basic starter with:
 Project documentation lives under `docs/`.
 
 - `docs/agent_questions/README.md`: index and navigation for questions-related agents
-- `docs/agent_questions/how-to-use-questions-agent.md`: how to run and use the questions agent
+- `docs/agent_questions/README.md`: how to run and validate the `agent_questions` implementation
+- `docs/agent_retriever/README.md`: how to run and validate the `agent_retriever` implementation
 
 Use the docs folder as the source of truth for agent-specific behavior, usage, and navigation.

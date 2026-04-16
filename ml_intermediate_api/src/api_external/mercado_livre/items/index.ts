@@ -1,8 +1,5 @@
 import https from "node:https";
-import {
-  questionsSearchResponseSchema,
-  type QuestionsSearchResponse,
-} from "./types.js";
+import { mercadoLivreItemSchema, type MercadoLivreItem } from "./types.js";
 
 const ML_API_BASE_URL = "https://api.mercadolibre.com";
 
@@ -14,13 +11,10 @@ function getEnv(name: string): string {
   return value;
 }
 
-export async function listSellerQuestions(): Promise<QuestionsSearchResponse> {
+export async function getItemById(itemId: string): Promise<MercadoLivreItem> {
   const accessToken = getEnv("ML_TOKEN_SECRET");
-  const sellerId = getEnv("SELLER_ID");
 
-  const url = new URL(`${ML_API_BASE_URL}/questions/search`);
-  url.searchParams.set("seller_id", sellerId);
-  url.searchParams.set("api_version", "4");
+  const url = new URL(`${ML_API_BASE_URL}/items/${encodeURIComponent(itemId)}`);
 
   const responseBody = await new Promise<string>((resolve, reject) => {
     const req = https.request(
@@ -65,6 +59,5 @@ export async function listSellerQuestions(): Promise<QuestionsSearchResponse> {
   });
 
   const json = JSON.parse(responseBody);
-  return questionsSearchResponseSchema.parse(json);
+  return mercadoLivreItemSchema.parse(json);
 }
-

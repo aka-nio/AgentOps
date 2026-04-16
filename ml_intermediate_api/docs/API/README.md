@@ -6,10 +6,7 @@ Central index for API endpoint and verification documentation.
 
 - External auth token: `docs/API/endpoints/external-auth.md`
 - Mercado Livre questions: `docs/API/endpoints/mercado-livre-questions.md`
-
-## Testing
-
-- Docker CRUD smoke verification: `docs/API/testing/docker-smoke.md`
+- Mercado Livre item: `docs/API/endpoints/mercado-livre-items.md`
 
 ## How to keep this updated
 

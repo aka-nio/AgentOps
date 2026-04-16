@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { fetch_ml_questions } from "./tools.js";
+import { fetch_ml_questions } from "./tools/index.js";
 import type { MercadoLivreQuestion } from "./types.js";
 
 const __filename = fileURLToPath(import.meta.url);

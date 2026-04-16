@@ -1,20 +1,38 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 
+/** Directory containing this file (`frontTest/`), not `process.cwd()` — so `.env` is always picked up. */
+const frontTestRoot = path.dirname(fileURLToPath(import.meta.url));
+
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), "VITE_");
-  const agentTarget = env.VITE_AGENT_API_URL || "http://localhost:3000";
+  const env = loadEnv(mode, frontTestRoot, "VITE_");
+  /** Node server from this repo (`src/server.ts`). Prefer this over VITE_AGENT_API_URL when that URL is the Fastify ML proxy. */
+  const mlAgentsTarget =
+    env.VITE_ML_AGENTS_SERVER_URL || env.VITE_AGENT_API_URL || "http://localhost:3000";
   const retrieverTarget = env.VITE_RETRIEVER_PROXY_ML_URL || "http://localhost:3001";
 
   return {
-    plugins: [react()],
+    envDir: frontTestRoot,
+    plugins: [
+      react(),
+      {
+        name: "fronttest-log-proxy-targets",
+        configureServer() {
+          console.info(`[frontTest] Vite envDir: ${frontTestRoot}`);
+          console.info(`[frontTest] proxy /ml-agents -> ${mlAgentsTarget}`);
+          console.info(`[frontTest] proxy /retriever-api -> ${retrieverTarget}`);
+        }
+      }
+    ],
     server: {
       proxy: {
-        "/agent-api": {
-          target: agentTarget,
+        "/ml-agents": {
+          target: mlAgentsTarget,
           changeOrigin: true,
-          rewrite: (p) => p.replace(/^\/agent-api/, "")
+          rewrite: (p) => p.replace(/^\/ml-agents/, "")
         },
         "/retriever-api": {
           target: retrieverTarget,
