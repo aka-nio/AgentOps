@@ -7,12 +7,18 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Candidate {
-  id        String   @id @default(uuid())
-  name      String
-  email     String   @unique
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+model Question {
+  id          String   @id @default(uuid())
+  mlQuestionId BigInt  @map("ml_question_id")
+  itemId      String   @map("item_id")
+  sellerId    BigInt   @map("seller_id")
+  status      String
+  text        String?  @db.Text
+  dateCreated DateTime @map("date_created")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
-  @@map("candidate")
+  @@map("question")
+  @@index([sellerId], map: "idx_question_seller_id")
+  @@index([itemId], map: "idx_question_item_id")
 }

@@ -1,0 +1,34 @@
+{
+  "name": "ml_agents",
+  "version": "1.0.0",
+  "description": "Node.js + TypeScript + LangChain/LangGraph + MongoDB starter",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "nodemon",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit",
+    "agent:retriever": "tsx src/agent_retriever/run.ts",
+    "agent:retriever:dry": "RETRIEVER_DRY_RUN=1 tsx src/agent_retriever/run.ts --dry-run"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@langchain/langgraph": "^1.2.8",
+    "@langchain/mongodb": "^1.1.0",
+    "@langchain/openai": "^1.4.4",
+    "bcryptjs": "^3.0.3",
+    "langchain": "^1.3.3",
+    "mongodb": "^6.21.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^22.13.10",
+    "nodemon": "^3.1.10",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}

@@ -1,3 +1,4 @@
+import "dotenv/config";
 import Fastify from "fastify";
 import mainProtectedRoutes from "./api/routes/mainProtected.routes.js";
 import mainPublicRoutes from "./api/routes/mainPublic.routes.js";

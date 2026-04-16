@@ -1,0 +1,22 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.app
+    container_name: ml-agents-app
+    env_file:
+      - ../.env
+    ports:
+      - "3000:3000"
+    depends_on:
+      - mongo
+
+  mongo:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.mongo
+    container_name: ml-agents-mongo
+    ports:
+      - "27017:27017"
+    tmpfs:
+      - /data/db
