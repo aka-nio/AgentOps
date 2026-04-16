@@ -3,6 +3,7 @@ import { z } from "zod";
 import { runAgentQuestionsWithResult } from "./agent_questions/agent.js";
 import { PreparedQuestionsPayloadSchema } from "./agent_questions/ag_questions_type.js";
 import { env } from "./config/env.js";
+import { withAgentRunLog } from "./lib/agent-run-log.js";
 import { agentGraph } from "./graph/agent-graph.js";
 import { closeMongoClient } from "./lib/mongodb.js";
 import { getVectorStore } from "./lib/vector-store.js";
@@ -50,7 +51,7 @@ const server = createServer(async (req, res) => {
       return sendJson(res, 400, { error: "Invalid request." });
     }
 
-    if (req.method === "GET" && req.url === "/health") {
+    if (req.method === "GET" && (req.url === "/health" || req.url === "/graph-health")) {
       return sendJson(res, 200, {
         status: "ok",
         environment: env.NODE_ENV,
@@ -60,7 +61,11 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "POST" && req.url === "/invoke") {
       const body = await parseJsonBody(req, invokeSchema);
-      const result = await agentGraph.invoke({ input: body.input });
+      const result = await withAgentRunLog(
+        "graph_invoke",
+        { inputLength: body.input.length },
+        async (log) => log.withLlmStep("langgraph_invoke", () => agentGraph.invoke({ input: body.input }))
+      );
       return sendJson(res, 200, { output: result.output });
     }
 

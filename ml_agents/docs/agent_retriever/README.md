@@ -106,6 +106,19 @@ Format:
 }
 ```
 
+## Logging
+
+Runs started via `npm run agent:retriever` emit JSON lines under `logs/agents-YYYY-MM-DD.jsonl`:
+
+- Top-level `agent` is **`agent_retriever`** (`run_start` / `run_end`).
+- Mercado HTTP is performed by the **`fetch_ml_questions`** tool, which logs as `kind: "tool"` with `subsystem: "mercado_livre_proxy"` (same shared tools as `agent_questions`).
+
+The **retriever agent** is a separate CLI from **agent questions**. frontTest “Run agent questions” only calls the ml_agents HTTP handler for **`agent_questions`**, so you will not see a new `agent_retriever` run in logs until you run the retriever script (or another code path that calls `runAgentRetriever`).
+
+## Mercado traffic from ml_agents
+
+Both agents call the Mercado Livre API **from the Node process** using `RETRIEVER_PROXY_ML_URL` in **`ml_agents/.env`** (plain `fetch` to `{RETRIEVER_PROXY_ML_URL}/api/mercado-livre/...`). That is **not** the browser `frontTest` Vite proxy; Vite is only for the React dev UI.
+
 ## Validation and Type Safety
 
 `agent_retriever` is type-safe using Zod + TypeScript:

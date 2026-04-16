@@ -1,9 +1,11 @@
 import "dotenv/config";
 import Fastify from "fastify";
+import mlAgentsUpstreamProxy from "./api/ml_agents_proxy/mlAgentsUpstream.proxy.js";
 import mainProtectedRoutes from "./api/routes/mainProtected.routes.js";
 import mainPublicRoutes from "./api/routes/mainPublic.routes.js";
 
-const port = Number(process.env.PORT ?? 3000);
+/** Default 3001 avoids clashing with ml_agents (`src/server.ts`), which defaults to PORT 3000. */
+const port = Number(process.env.PORT ?? 3001);
 
 const app = Fastify({
   logger: true,
@@ -16,6 +18,7 @@ app.setErrorHandler((error, request, reply) => {
 
 app.get("/health", async () => ({ ok: true }));
 
+await app.register(mlAgentsUpstreamProxy);
 await app.register(mainPublicRoutes);
 await app.register(mainProtectedRoutes);
 

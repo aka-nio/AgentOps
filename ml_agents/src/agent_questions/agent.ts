@@ -6,6 +6,7 @@ import { z } from "zod";
 import { type MercadoLivreItemPayload, type MercadoLivreQuestion } from "../agent_retriever/types.js";
 import { env } from "../config/env.js";
 import { fetch_ml_item } from "../agent_retriever/tools/items.js";
+import { getAgentRunLogger, withAgentRunLog } from "../lib/agent-run-log.js";
 import {
   ItemContextDecisionSchema,
   PreparedQuestionsPayloadSchema,
@@ -97,8 +98,11 @@ const decideNeedItemContext = async (question: MercadoLivreQuestion): Promise<z.
     `- text: ${question.text || "(empty)"}`
   ].join("\n");
 
-  const result = await model.invoke(prompt);
-  const raw = typeof result.content === "string" ? result.content : JSON.stringify(result.content);
+  const log = getAgentRunLogger();
+  const msg = log
+    ? await log.withLlmStep("openai_item_context_decision", () => model.invoke(prompt), { questionId: question.id })
+    : await model.invoke(prompt);
+  const raw = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
 
   try {
     const json: unknown = JSON.parse(raw.trim());
@@ -182,7 +186,17 @@ const draftAnswer = async (question: MercadoLivreQuestion, rules: string): Promi
   const model = getChatModel(0.4);
 
   const prompt = buildPrompt(rules, question, itemContext);
-  const result = await model.invoke(prompt);
+  const log = getAgentRunLogger();
+  const result = log
+    ? await log.withLlmStep(
+        "openai_draft_answer",
+        () => model.invoke(prompt),
+        {
+          questionId: question.id,
+          hasItemContext: Boolean(itemContext)
+        }
+      )
+    : await model.invoke(prompt);
   const content = typeof result.content === "string" ? result.content : JSON.stringify(result.content);
 
   return {
@@ -243,18 +257,27 @@ const persistRunLog = async (runLog: AnswersRunLog, persist: boolean): Promise<A
     return { mode: "completed", run: runLog, persisted: false };
   }
 
-  const outDir = path.join(__dirname, "outputs");
-  await mkdir(outDir, { recursive: true });
+  const log = getAgentRunLogger();
+  const writeOutputs = async (): Promise<void> => {
+    const outDir = path.join(__dirname, "outputs");
+    await mkdir(outDir, { recursive: true });
 
-  const latestPath = path.join(outDir, "answers-created.json");
-  await writeFile(latestPath, JSON.stringify(runLog, null, 2), "utf8");
-  console.log(`[agent_questions] wrote tracking file ${latestPath}`);
+    const latestPath = path.join(outDir, "answers-created.json");
+    await writeFile(latestPath, JSON.stringify(runLog, null, 2), "utf8");
+    console.log(`[agent_questions] wrote tracking file ${latestPath}`);
 
-  const historyPath = path.join(outDir, "answers-history.json");
-  const history = await loadAnswersHistory(historyPath);
-  history.runs.push(runLog);
-  await writeFile(historyPath, JSON.stringify(history, null, 2), "utf8");
-  console.log(`[agent_questions] updated tracking history ${historyPath}`);
+    const historyPath = path.join(outDir, "answers-history.json");
+    const history = await loadAnswersHistory(historyPath);
+    history.runs.push(runLog);
+    await writeFile(historyPath, JSON.stringify(history, null, 2), "utf8");
+    console.log(`[agent_questions] updated tracking history ${historyPath}`);
+  };
+
+  if (log) {
+    await log.withStep("persist_answer_artifacts", writeOutputs, { answerCount: runLog.total_answers });
+  } else {
+    await writeOutputs();
+  }
 
   return { mode: "completed", run: runLog, persisted: true };
 };
@@ -266,59 +289,75 @@ const persistRunLog = async (runLog: AnswersRunLog, persist: boolean): Promise<A
 export const runAgentQuestionsWithResult = async (
   options: RunAgentQuestionsOptions = {}
 ): Promise<AgentQuestionsRunResult> => {
-  const rulesPath = path.join(__dirname, "RULES.md");
-  const rules = await readFile(rulesPath, "utf8");
+  return withAgentRunLog(
+    "agent_questions",
+    {
+      dryRun: Boolean(options.dryRun),
+      persist: options.persist !== false,
+      limit: options.limit ?? null
+    },
+    async (log) => {
+      const rulesPath = path.join(__dirname, "RULES.md");
+      const rules = await log.withStep("load_rules_md", () => readFile(rulesPath, "utf8"));
 
-  const { prepared, source, source_path } = await resolvePreparedPayload(options);
-  const payloadPathForLog = source === "file" ? (source_path ?? "file") : "inline_payload";
+      const { prepared, source, source_path } = await log.withStep("resolve_prepared_payload", () =>
+        resolvePreparedPayload(options)
+      );
+      const payloadPathForLog = source === "file" ? (source_path ?? "file") : "inline_payload";
 
-  const unanswered = prepared.questions.filter((q) => q.status === "UNANSWERED");
-  const selected = typeof options.limit === "number" ? unanswered.slice(0, options.limit) : unanswered;
+      const unanswered = prepared.questions.filter((q) => q.status === "UNANSWERED");
+      const selected = typeof options.limit === "number" ? unanswered.slice(0, options.limit) : unanswered;
 
-  if (options.dryRun) {
-    const dry: AgentQuestionsDryRunResult = {
-      mode: "dry_run",
-      source,
-      ...(source === "file" && source_path ? { source_path } : {}),
-      total_unanswered: unanswered.length,
-      would_process: selected.length,
-      questions: selected.map((q) => ({
-        id: q.id,
-        item_id: q.item_id,
-        status: q.status,
-        text_preview: (q.text ?? "").slice(0, 160)
-      }))
-    };
-    return dry;
-  }
+      if (options.dryRun) {
+        const dry: AgentQuestionsDryRunResult = {
+          mode: "dry_run",
+          source,
+          ...(source === "file" && source_path ? { source_path } : {}),
+          total_unanswered: unanswered.length,
+          would_process: selected.length,
+          questions: selected.map((q) => ({
+            id: q.id,
+            item_id: q.item_id,
+            status: q.status,
+            text_preview: (q.text ?? "").slice(0, 160)
+          }))
+        };
+        return dry;
+      }
 
-  const draftedAnswers: Array<DraftedAnswer & DraftAnswerMeta> = [];
+      const draftedAnswers: Array<DraftedAnswer & DraftAnswerMeta> = [];
 
-  for (const question of selected) {
-    const drafted = await draftAnswer(question, rules);
-    draftedAnswers.push(drafted);
-    console.log(
-      `[agent_questions] drafted answer for question ${question.id} (item_context=${drafted.used_item_context ? "yes" : "no"})`
-    );
-  }
+      for (const question of selected) {
+        const drafted = await log.withStep(
+          "draft_answer_question",
+          () => draftAnswer(question, rules),
+          { questionId: question.id, itemId: question.item_id }
+        );
+        draftedAnswers.push(drafted);
+        console.log(
+          `[agent_questions] drafted answer for question ${question.id} (item_context=${drafted.used_item_context ? "yes" : "no"})`
+        );
+      }
 
-  const runLog: AnswersRunLog = {
-    run_at: new Date().toISOString(),
-    source_payload_path: payloadPathForLog,
-    total_answers: draftedAnswers.length,
-    answers: draftedAnswers.map(({ question, answer, used_item_context, item_context_error }) => ({
-      question_id: question.id,
-      item_id: question.item_id,
-      status: question.status,
-      question_text: question.text,
-      used_item_context,
-      ...(item_context_error ? { item_context_error } : {}),
-      answer
-    }))
-  };
+      const runLog: AnswersRunLog = {
+        run_at: new Date().toISOString(),
+        source_payload_path: payloadPathForLog,
+        total_answers: draftedAnswers.length,
+        answers: draftedAnswers.map(({ question, answer, used_item_context, item_context_error }) => ({
+          question_id: question.id,
+          item_id: question.item_id,
+          status: question.status,
+          question_text: question.text,
+          used_item_context,
+          ...(item_context_error ? { item_context_error } : {}),
+          answer
+        }))
+      };
 
-  const persist = options.persist !== false;
-  return persistRunLog(runLog, persist);
+      const persist = options.persist !== false;
+      return persistRunLog(runLog, persist);
+    }
+  );
 };
 
 export const runAgentQuestions = async (options: RunAgentQuestionsOptions = {}): Promise<void> => {

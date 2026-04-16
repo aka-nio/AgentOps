@@ -9,7 +9,7 @@ export default function OverviewPage() {
 
   const endpoints = useMemo(
     () => ({
-      health: "/ml-agents/health",
+      health: "/ml-agents/graph-health",
       invoke: "/ml-agents/invoke"
     }),
     []

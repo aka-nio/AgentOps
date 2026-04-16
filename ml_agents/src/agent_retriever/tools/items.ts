@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { tool } from "@langchain/core/tools";
+import { getAgentRunLogger } from "../../lib/agent-run-log.js";
 import { env } from "../../config/env.js";
 import { MercadoLivreItemPayloadSchema } from "../types.js";
 
@@ -12,19 +13,28 @@ const FetchItemInputSchema = z.object({
 
 export const fetch_ml_item = tool(
   async ({ item_id }: z.infer<typeof FetchItemInputSchema>) => {
-    const baseUrl = env.RETRIEVER_PROXY_ML_URL.replace(/\/+$/, "");
-    const url = new URL(`${baseUrl}/api/mercado-livre/items/${encodeURIComponent(item_id)}`);
+    const input = { item_id };
+    const run = async () => {
+      const baseUrl = env.RETRIEVER_PROXY_ML_URL.replace(/\/+$/, "");
+      const url = new URL(`${baseUrl}/api/mercado-livre/items/${encodeURIComponent(item_id)}`);
 
-    const res = await fetch(url.toString(), {
-      headers: { accept: "application/json" }
-    });
+      const res = await fetch(url.toString(), {
+        headers: { accept: "application/json" }
+      });
 
-    if (!res.ok) {
-      throw new Error(`Proxy request failed: ${res.status} ${res.statusText}`);
+      if (!res.ok) {
+        throw new Error(`Proxy request failed: ${res.status} ${res.statusText}`);
+      }
+
+      const json = await res.json();
+      return MercadoLivreItemPayloadSchema.parse(json);
+    };
+
+    const log = getAgentRunLogger();
+    if (log) {
+      return log.withTool("fetch_ml_item", input, run, { subsystem: "mercado_livre_proxy" });
     }
-
-    const json = await res.json();
-    return MercadoLivreItemPayloadSchema.parse(json);
+    return run();
   },
   {
     name: "fetch_ml_item",

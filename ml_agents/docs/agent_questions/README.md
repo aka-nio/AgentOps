@@ -112,6 +112,15 @@ Each answer entry includes:
 - `used_item_context`: whether listing data was fetched and injected into the prompt
 - `item_context_error` (optional): populated if the item fetch failed
 
+## How runs are triggered (and what shows in logs)
+
+- **CLI:** `npm run agent:questions` → logs use top-level `agent`: **`agent_questions`**.
+- **HTTP:** `POST /agent-questions/run` on `ml_agents/src/server.ts` (e.g. from frontTest) → same **`agent_questions`** run logs.
+
+Mercado listing/item fetches use the shared tools in `src/agent_retriever/tools/` (`fetch_ml_item`, etc.). Those HTTP calls go **directly** from the ml_agents server to **`RETRIEVER_PROXY_ML_URL`** (see `ml_agents/.env`), not through the Vite dev proxy. In JSONL output, those appear as `kind: "tool"` with `subsystem: "mercado_livre_proxy"`; the parent `agent` field is still **`agent_questions`** because the retriever CLI is not running as a separate process.
+
+To get **`agent_retriever`** as the top-level `agent` in logs, run `npm run agent:retriever` (that flow uses `fetch_ml_questions` only).
+
 ## Validation and Type Safety
 
 `agent_questions` is type-safe using Zod + TypeScript:
