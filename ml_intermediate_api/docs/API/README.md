@@ -7,6 +7,7 @@ Central index for API endpoint and verification documentation.
 - External auth token: `docs/API/endpoints/external-auth.md`
 - Mercado Livre questions: `docs/API/endpoints/mercado-livre-questions.md`
 - Mercado Livre item: `docs/API/endpoints/mercado-livre-items.md`
+- Mercado Livre catch-all proxy: `docs/API/endpoints/mercado-livre-ml-proxy.md`
 
 ## How to keep this updated
 

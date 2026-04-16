@@ -33,6 +33,7 @@ npm run start
 - External auth endpoint: `docs/API/endpoints/external-auth.md`
 - Mercado Livre questions endpoint: `docs/API/endpoints/mercado-livre-questions.md`
 - Mercado Livre item endpoint: `docs/API/endpoints/mercado-livre-items.md`
+- Mercado Livre catch-all proxy: `docs/API/endpoints/mercado-livre-ml-proxy.md`
 
 ## Prisma version and constraints
 
