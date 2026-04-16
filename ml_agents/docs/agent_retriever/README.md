@@ -2,6 +2,8 @@
 
 This document explains how to run and validate the `agent_retriever` implementation.
 
+**Navigation:** [Documentation index](../README.md) · [Agent questions](../agent_questions/README.md)
+
 ## Current Retriever Implementation
 
 `agent_retriever` currently does:
@@ -66,10 +68,12 @@ RETRIEVER_LIMIT=5 npm run agent:retriever
 
 ## Proxy Route
 
-Retriever tool targets:
+Retriever tools call the Mercado Livre API (for example **ml_intermediate_api** under the `/api` prefix). Targets:
 
 - `GET {RETRIEVER_PROXY_ML_URL}/api/mercado-livre/questions?status=UNANSWERED`
-- `GET {RETRIEVER_PROXY_ML_URL}/mercado-livre/items/{itemId}`
+- `GET {RETRIEVER_PROXY_ML_URL}/api/mercado-livre/items/{itemId}`
+
+In **frontTest**, the Vite dev proxy maps `GET /retriever-api/api/mercado-livre/questions?...` to the same paths on `VITE_RETRIEVER_PROXY_ML_URL`.
 
 Supported statuses in types/schemas:
 

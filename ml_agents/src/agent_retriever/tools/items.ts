@@ -13,7 +13,7 @@ const FetchItemInputSchema = z.object({
 export const fetch_ml_item = tool(
   async ({ item_id }: z.infer<typeof FetchItemInputSchema>) => {
     const baseUrl = env.RETRIEVER_PROXY_ML_URL.replace(/\/+$/, "");
-    const url = new URL(`${baseUrl}/mercado-livre/items/${encodeURIComponent(item_id)}`);
+    const url = new URL(`${baseUrl}/api/mercado-livre/items/${encodeURIComponent(item_id)}`);
 
     const res = await fetch(url.toString(), {
       headers: { accept: "application/json" }
@@ -29,7 +29,7 @@ export const fetch_ml_item = tool(
   {
     name: "fetch_ml_item",
     description:
-      "Fetch Mercado Livre item details from the retriever proxy API (/mercado-livre/items/:itemId).",
+      "Fetch Mercado Livre item details from the retriever proxy API (/api/mercado-livre/items/:itemId).",
     schema: FetchItemInputSchema
   }
 );

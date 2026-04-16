@@ -10,10 +10,10 @@ Basic starter with:
 
 ## Docs
 
-Project documentation lives under `docs/`.
+Project documentation lives under [`docs/`](docs/README.md).
 
-- `docs/agent_questions/README.md`: index and navigation for questions-related agents
-- `docs/agent_questions/README.md`: how to run and validate the `agent_questions` implementation
-- `docs/agent_retriever/README.md`: how to run and validate the `agent_retriever` implementation
+- **[Documentation index](docs/README.md)** — navigation to all agent guides
+- **[Agent retriever](docs/agent_retriever/README.md)** — run and validate the Mercado Livre retriever CLI
+- **[Agent questions](docs/agent_questions/README.md)** — run and validate the question-answering agent
 
 Use the docs folder as the source of truth for agent-specific behavior, usage, and navigation.

@@ -2,6 +2,8 @@
 
 This document explains how to run and validate the `agent_questions` implementation.
 
+**Navigation:** [Documentation index](../README.md) · [Agent retriever](../agent_retriever/README.md)
+
 ## Current Questions Implementation
 
 `agent_questions` currently does:
@@ -9,7 +11,7 @@ This document explains how to run and validate the `agent_questions` implementat
 - read prepared unanswered questions payload (default from retriever output)
 - filter `UNANSWERED` questions
 - decide whether the buyer question needs listing/item details
-- when needed, fetch item details via `fetch_ml_item` (`/mercado-livre/items/:itemId`)
+- when needed, fetch item details via `fetch_ml_item` (`/api/mercado-livre/items/:itemId` on the proxy)
 - generate suggested answers with OpenAI `gpt-4o-mini`
 - save JSON tracking files for latest run and history
 
