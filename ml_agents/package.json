@@ -15,6 +15,9 @@
   "author": "",
   "license": "ISC",
   "type": "module",
+  "engines": {
+    "node": "^24.0.0"
+  },
   "dependencies": {
     "@langchain/langgraph": "^1.2.8",
     "@langchain/mongodb": "^1.1.0",
