@@ -7,6 +7,13 @@ Central index for API endpoint and verification documentation.
 - External auth token: `docs/API/endpoints/external-auth.md`
 - Mercado Livre questions: `docs/API/endpoints/mercado-livre-questions.md`
 - Mercado Livre item: `docs/API/endpoints/mercado-livre-items.md`
+- Mercado Livre user: `docs/API/endpoints/mercado-livre-users.md`
+
+**Mercado Livre public routes** (thin proxies; details in each file above):
+
+- `GET /api/mercado-livre/questions`
+- `GET /api/mercado-livre/items/:itemId`
+- `GET /api/mercado-livre/users/:sellerId` — numeric Mercado Livre user id (same id commonly used as seller id)
 
 ## How to keep this updated
 

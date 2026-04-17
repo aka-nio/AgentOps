@@ -89,9 +89,16 @@ The payload is validated using Zod schemas under `api_external/mercado_livre/que
 }
 ```
 
+## Related endpoints
+
+- User profile by numeric seller / user id: `docs/API/endpoints/mercado-livre-users.md`
+- Item by id: `docs/API/endpoints/mercado-livre-items.md`
+
 ## Curl example
 
+The dev server defaults to `PORT=3001` (see root `README.md`); change the port if yours differs.
+
 ```bash
-curl -s http://localhost:3000/api/mercado-livre/questions
+curl -s "http://localhost:3001/api/mercado-livre/questions"
 ```
 

@@ -66,7 +66,10 @@ const server = createServer(async (req, res) => {
         { inputLength: body.input.length },
         async (log) => log.withLlmStep("langgraph_invoke", () => agentGraph.invoke({ input: body.input }))
       );
-      return sendJson(res, 200, { output: result.output });
+      return sendJson(res, 200, {
+        output: result.output,
+        orchestration: result.orchestration
+      });
     }
 
     if (req.method === "POST" && req.url === "/vectors/search") {

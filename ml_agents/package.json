@@ -11,7 +11,8 @@
     "agent:retriever": "tsx src/agent_retriever/run.ts",
     "agent:retriever:dry": "RETRIEVER_DRY_RUN=1 tsx src/agent_retriever/run.ts --dry-run",
     "agent:questions": "tsx src/agent_questions/run.ts",
-    "agent:questions:dry": "AGENT_QUESTIONS_DRY_RUN=1 tsx src/agent_questions/run.ts --dry-run"
+    "agent:questions:dry": "AGENT_QUESTIONS_DRY_RUN=1 tsx src/agent_questions/run.ts --dry-run",
+    "orchestrator": "tsx src/graph/run-orchestrator.ts"
   },
   "keywords": [],
   "author": "",

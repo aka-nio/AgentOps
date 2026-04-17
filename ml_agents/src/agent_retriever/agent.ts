@@ -18,8 +18,28 @@ export type RunAgentRetrieverOptions = {
   dryRun?: boolean;
 };
 
-export const runAgentRetriever = async (options: RunAgentRetrieverOptions = {}): Promise<void> => {
-  await withAgentRunLog(
+export type AgentRetrieverDryRunResult = {
+  mode: "dry_run";
+  would_process: number;
+  questions: Array<{
+    id: number;
+    item_id: string;
+    text_preview: string;
+  }>;
+};
+
+export type AgentRetrieverExecutedResult = {
+  mode: "executed";
+  output_path: string;
+  question_count: number;
+};
+
+export type AgentRetrieverRunResult = AgentRetrieverDryRunResult | AgentRetrieverExecutedResult;
+
+export const runAgentRetrieverWithResult = async (
+  options: RunAgentRetrieverOptions = {}
+): Promise<AgentRetrieverRunResult> => {
+  return withAgentRunLog(
     "agent_retriever",
     { dryRun: Boolean(options.dryRun), limit: options.limit ?? null },
     async (log) => {
@@ -32,11 +52,15 @@ export const runAgentRetriever = async (options: RunAgentRetrieverOptions = {}):
       };
 
       if (options.dryRun) {
-        console.log(`[agent_retriever] dry-run: would prepare ${selected.length} unanswered questions`);
-        console.log(
-          selected.map((q) => `- ${q.id} (${q.item_id}) ${q.text?.slice(0, 60) ?? ""}`).join("\n")
-        );
-        return;
+        return {
+          mode: "dry_run",
+          would_process: selected.length,
+          questions: selected.map((q) => ({
+            id: q.id,
+            item_id: q.item_id,
+            text_preview: (q.text ?? "").slice(0, 160)
+          }))
+        };
       }
 
       const outPath = await log.withStep(
@@ -52,7 +76,25 @@ export const runAgentRetriever = async (options: RunAgentRetrieverOptions = {}):
         { questionCount: payload.total }
       );
 
-      console.log(`[agent_retriever] prepared ${payload.total} unanswered questions at ${outPath}`);
+      return {
+        mode: "executed",
+        output_path: outPath,
+        question_count: payload.total
+      };
     }
+  );
+};
+
+export const runAgentRetriever = async (options: RunAgentRetrieverOptions = {}): Promise<void> => {
+  const result = await runAgentRetrieverWithResult(options);
+
+  if (result.mode === "dry_run") {
+    console.log(`[agent_retriever] dry-run: would prepare ${result.would_process} unanswered questions`);
+    console.log(result.questions.map((q) => `- ${q.id} (${q.item_id}) ${q.text_preview.slice(0, 60)}`).join("\n"));
+    return;
+  }
+
+  console.log(
+    `[agent_retriever] prepared ${result.question_count} unanswered questions at ${result.output_path}`
   );
 };

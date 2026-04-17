@@ -33,6 +33,9 @@ npm run start
 - External auth endpoint: `docs/API/endpoints/external-auth.md`
 - Mercado Livre questions endpoint: `docs/API/endpoints/mercado-livre-questions.md`
 - Mercado Livre item endpoint: `docs/API/endpoints/mercado-livre-items.md`
+- Mercado Livre user endpoint: `docs/API/endpoints/mercado-livre-users.md` (`GET /api/mercado-livre/users/:sellerId` — numeric user / seller id; uses `ML_TOKEN_SECRET`)
+
+For a single index of Mercado Livre routes and links to full specs, see `docs/API/README.md`.
 
 ## Prisma version and constraints
 
