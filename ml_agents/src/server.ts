@@ -4,7 +4,7 @@ import { runAgentQuestionsWithResult } from "./agent_questions/agent.js";
 import { PreparedQuestionsPayloadSchema } from "./agent_questions/ag_questions_type.js";
 import { env } from "./config/env.js";
 import { withAgentRunLog } from "./lib/agent-run-log.js";
-import { agentGraph } from "./graph/agent-graph.js";
+import { invokeAgentGraphWithTelemetry } from "./graph/graph-invoke.js";
 import { closeMongoClient } from "./lib/mongodb.js";
 import { getVectorStore } from "./lib/vector-store.js";
 
@@ -63,12 +63,16 @@ const server = createServer(async (req, res) => {
       const body = await parseJsonBody(req, invokeSchema);
       const result = await withAgentRunLog(
         "graph_invoke",
-        { inputLength: body.input.length },
-        async (log) => log.withLlmStep("langgraph_invoke", () => agentGraph.invoke({ input: body.input }))
+        { inputLength: body.input.length, input_preview: body.input.slice(0, 240) },
+        async (log) => invokeAgentGraphWithTelemetry(body.input, log)
       );
       return sendJson(res, 200, {
+        runId: result.runId,
         output: result.output,
-        orchestration: result.orchestration
+        orchestration: result.orchestration,
+        llm_tokens: result.llm_tokens,
+        trace: result.trace,
+        planner_depth: result.planner_depth
       });
     }
 

@@ -4,7 +4,9 @@ export const OrchestrationRouteSchema = z.enum([
   "agent_retriever",
   "agent_questions",
   "vector_search",
-  "help"
+  "help",
+  /** Goal satisfied or no further tool step; graph ends. */
+  "done"
 ]);
 
 export type OrchestrationRoute = z.infer<typeof OrchestrationRouteSchema>;
@@ -16,6 +18,8 @@ export const OrchestrationDecisionSchema = z.object({
   dry_run: z.boolean().optional(),
   /** For vector_search only. */
   vector_k: z.number().int().positive().max(20).optional(),
+  /** Short chain-of-thought for logs / debugging (not shown to end users by default). */
+  thought: z.string().max(1500).optional(),
   reason: z.string().max(500)
 });
 
@@ -23,13 +27,49 @@ export type OrchestrationDecision = z.infer<typeof OrchestrationDecisionSchema>;
 
 const normalize = (s: string): string => s.toLowerCase();
 
+const traceHas = (trace: readonly string[], needle: string): boolean =>
+  trace.some((line) => line.includes(needle));
+
+const combinedFetchAndAnswerIntent = (t: string): boolean =>
+  /\b(and|e|then|depois|em seguida)\b.*\b(answer|responder|draft|rascunho|reply|resposta)\b/i.test(t) ||
+  /\b(answer|responder|draft|rascunho).*\b(and|e|then|after|depois)\b.*\b(fetch|buscar|retrieve|perguntas)\b/i.test(t) ||
+  /\b(fetch|buscar|retrieve|trazer).*\b(and|e|then|depois)\b.*\b(answer|responder|draft|rascunho)\b/i.test(t) ||
+  /\b(buscar|fetch).{0,40}\b(responder|answer|draft)\b/i.test(t) ||
+  /\b(pipeline|fluxo completo|end[- ]to[- ]end|tudo de uma vez|tudo numa vez)\b/i.test(t);
+
 /** Used when `OPENAI_API_KEY` is missing or the structured call fails. */
-export const inferRouteFromHeuristics = (input: string): OrchestrationDecision => {
+export const inferRouteFromHeuristics = (input: string, trace: readonly string[] = []): OrchestrationDecision => {
   const t = normalize(input);
+
+  if (traceHas(trace, "[agent_questions]")) {
+    return { route: "done", reason: "heuristic: agent_questions already ran (success, dry-run, or failure)" };
+  }
+
+  if (traceHas(trace, "[vector_search]")) {
+    return { route: "done", reason: "heuristic: vector search step completed" };
+  }
+
+  if (traceHas(trace, "[agent_retriever]") && traceHas(trace, "failed")) {
+    return { route: "done", reason: "heuristic: retriever failed; stopping" };
+  }
+
+  if (traceHas(trace, "[agent_retriever]") && traceHas(trace, "dry_run")) {
+    return { route: "done", reason: "heuristic: retriever dry-run finished (no persisted JSON for drafting)" };
+  }
+
+  if (traceHas(trace, "[agent_retriever]") && traceHas(trace, "ok") && !traceHas(trace, "[agent_questions]")) {
+    if (/\bdry[-_ ]?run\b/i.test(t) && trace.length > 0) {
+      return { route: "done", reason: "heuristic: dry-run retriever only; skip drafting" };
+    }
+    return {
+      route: "agent_questions",
+      reason: "heuristic: after successful retriever, run questions to draft answers"
+    };
+  }
 
   if (
     /\b(help|ajuda|o que você faz|what can you do|how does this work|capabilities)\b/i.test(input) ||
-    t.trim().length < 4
+    (t.trim().length < 4 && trace.length === 0)
   ) {
     return { route: "help", reason: "heuristic: help or very short message" };
   }
@@ -39,6 +79,10 @@ export const inferRouteFromHeuristics = (input: string): OrchestrationDecision =
     /\b(find|encontre).{0,40}\b(in (the )?docs|na base|nos documentos)\b/i.test(t)
   ) {
     return { route: "vector_search", reason: "heuristic: vector / semantic search intent" };
+  }
+
+  if (combinedFetchAndAnswerIntent(t) && !traceHas(trace, "[agent_retriever]")) {
+    return { route: "agent_retriever", reason: "heuristic: combined pipeline — fetch questions first" };
   }
 
   if (
@@ -78,5 +122,6 @@ export const ORCHESTRATOR_HELP_TEXT = [
   "",
   "4) help — Esta mensagem.",
   "",
-  "Fluxo típico: retriever → questions. Você pode pedir tudo em uma única mensagem ao orquestrador; ele escolhe o próximo passo com base no contexto."
+  "O orquestrador pode **encadear** passos (retriever → questions) numa mesma execução até concluir ou atingir o limite de planejamento.",
+  "Para um fluxo típico numa frase: \"busque perguntas não respondidas e rascunhe respostas\"."
 ].join("\n");

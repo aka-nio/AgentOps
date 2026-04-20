@@ -1,10 +1,11 @@
-import { END, START, Annotation, StateGraph } from "@langchain/langgraph";
+import { END, START, Annotation, StateGraph, type LangGraphRunnableConfig } from "@langchain/langgraph";
 import { ChatOpenAI } from "@langchain/openai";
 import { runAgentRetrieverWithResult } from "../agent_retriever/agent.js";
 import { runAgentQuestionsWithResult } from "../agent_questions/agent.js";
 import type { AgentQuestionsRunResult } from "../agent_questions/agent.js";
 import { env } from "../config/env.js";
 import { getVectorStore } from "../lib/vector-store.js";
+import { getAgentGraphLogger } from "./graph-logger-context.js";
 import {
   OrchestrationDecisionSchema,
   type OrchestrationDecision,
@@ -12,43 +13,88 @@ import {
   ORCHESTRATOR_HELP_TEXT
 } from "./orchestration-schema.js";
 
+/** Max times the orchestrator may run (each run picks at most one tool, then replans). */
+const MAX_ORCHESTRATOR_INVOCATIONS = 12;
+
 const ORCHESTRATOR_SYSTEM = [
-  "You are the orquestrador (orchestrator) for the ml_agents project.",
-  "Given the user's message, choose exactly one route and optional parameters.",
+  "You are the orquestrador (orchestrator) for the ml_agents project in a **multi-step loop**.",
+  "You will see the user's original message, how many planner cycles have run, and an execution trace of completed tools.",
+  "Each turn you choose **exactly one** `route` for the **next** action, or `done` when the user's goal is satisfied.",
   "",
   "Routes:",
-  "- agent_retriever: User wants to fetch UNANSWERED Mercado Livre buyer questions from the API (via RETRIEVER_PROXY_ML_URL) and write/update unanswered-questions.json.",
-  "- agent_questions: User wants draft seller replies for questions already in unanswered-questions.json (needs OPENAI_API_KEY for LLM).",
-  "- vector_search: User wants semantic / similarity search over the MongoDB Atlas vector index (needs OPENAI_API_KEY and configured Mongo vector index).",
-  "- help: User greets, asks what you can do, or intent is unclear — no side-effect tools.",
+  "- agent_retriever: Fetch UNANSWERED Mercado Livre buyer questions and write unanswered-questions.json.",
+  "- agent_questions: Draft seller replies from unanswered-questions.json (requires OPENAI_API_KEY).",
+  "- vector_search: Semantic search over the MongoDB Atlas vector index.",
+  "- help: One-shot explanation of capabilities (only when trace is still empty and the user asks what you can do).",
+  "- done: Stop the loop — use after questions ran successfully, after vector_search, when nothing else is needed, or when stuck.",
+  "",
+  "Chain-of-thought:",
+  "- Fill `thought` with a brief reasoning (what you inferred, what is missing, what should run next).",
+  "- Keep `reason` as a short machine-facing summary.",
   "",
   "Rules:",
-  "- If the user asks how the system works or lists capabilities, use help.",
-  "- If they want answers but mention no prepared file, still choose agent_questions when clearly about drafting replies; the worker will explain if the file is missing.",
-  "- Extract limit (1–25) or dry_run only when the user clearly asks (e.g. \"dry run\", \"apenas 5\").",
-  "- For vector_search, you may set vector_k (1–20) if they ask for more/fewer hits.",
-  "- Always set reason to a short internal justification (one sentence)."
+  "- If the user wants **both** fresh questions **and** drafted answers, first run agent_retriever (if not yet successful in trace), then agent_questions once you see `[agent_retriever] ok` in trace.",
+  "- Never pick agent_questions before a successful retriever run **unless** the trace already shows `[agent_retriever] ok` from this session.",
+  "- After `[agent_questions] ok` or questions dry_run in trace, choose **done**.",
+  "- If trace shows `[agent_retriever] dry_run`, choose **done** (nothing was written for questions to consume).",
+  "- If the user only wanted vector search and trace shows vector results, choose **done**.",
+  "- Extract limit (1–25) or dry_run only when clearly requested.",
+  "- For vector_search, you may set vector_k (1–20).",
+  "- If unsure and trace is empty, prefer **help** over random tools."
 ].join("\n");
 
-const decideWithLlm = async (userInput: string): Promise<OrchestrationDecision> => {
+const buildOrchestratorUserMessage = (state: {
+  input: string;
+  trace: readonly string[];
+  planner_depth: number;
+}): string => {
+  const traceBlock =
+    state.trace.length > 0
+      ? state.trace.map((line, i) => `${i + 1}. ${line}`).join("\n")
+      : "(none yet)";
+
+  return [
+    "Original user request:",
+    state.input,
+    "",
+    `Planner cycle (1-based next action): ${state.planner_depth + 1} (hard cap ${MAX_ORCHESTRATOR_INVOCATIONS} orchestrator turns).`,
+    "",
+    "Execution trace (chronological):",
+    traceBlock
+  ].join("\n");
+};
+
+const decideWithLlm = async (state: {
+  input: string;
+  trace: readonly string[];
+  planner_depth: number;
+}): Promise<OrchestrationDecision> => {
+  if (state.planner_depth >= MAX_ORCHESTRATOR_INVOCATIONS) {
+    return {
+      route: "done",
+      reason: `planner cap reached (${MAX_ORCHESTRATOR_INVOCATIONS} turns)`
+    };
+  }
+
   if (!env.OPENAI_API_KEY) {
-    return inferRouteFromHeuristics(userInput);
+    return inferRouteFromHeuristics(state.input, state.trace);
   }
 
   const model = new ChatOpenAI({
     apiKey: env.OPENAI_API_KEY,
     model: "gpt-4o-mini",
     temperature: 0
-  }).withStructuredOutput(OrchestrationDecisionSchema);
+  }).withStructuredOutput(OrchestrationDecisionSchema, { includeRaw: true });
 
   try {
-    const raw = await model.invoke([
+    const res = await model.invoke([
       { role: "system", content: ORCHESTRATOR_SYSTEM },
-      { role: "user", content: userInput }
+      { role: "user", content: buildOrchestratorUserMessage(state) }
     ]);
-    return OrchestrationDecisionSchema.parse(raw);
+    const parsed = (res as { parsed: unknown }).parsed;
+    return OrchestrationDecisionSchema.parse(parsed);
   } catch {
-    return inferRouteFromHeuristics(userInput);
+    return inferRouteFromHeuristics(state.input, state.trace);
   }
 };
 
@@ -73,92 +119,218 @@ const GraphState = Annotation.Root({
     reducer: (_prev, next) => next,
     default: () => ""
   }),
+  /** Monotonic planner invocations (incremented each time `orquestrador` runs). */
+  planner_depth: Annotation<number>({
+    reducer: (_prev, next) => next,
+    default: () => 0
+  }),
+  /** One line per completed tool / milestone for replanning. */
+  trace: Annotation<string[]>({
+    reducer: (prev, next) => [...prev, ...next],
+    default: () => []
+  }),
   orchestration: Annotation<OrchestrationDecision>({
     reducer: (_prev, next) => next,
     default: () => ({ route: "help", reason: "pending" })
   }),
   output: Annotation<string>({
-    reducer: (_prev, next) => next,
+    reducer: (prev, next) => {
+      if (!next) {
+        return prev;
+      }
+      if (!prev) {
+        return next;
+      }
+      return `${prev}\n\n---\n\n${next}`;
+    },
     default: () => ""
   })
 });
 
-const orquestrador = async (state: typeof GraphState.State): Promise<Partial<typeof GraphState.State>> => {
-  const orchestration = await decideWithLlm(state.input);
-  return { orchestration };
-};
+const orquestrador = async (
+  state: typeof GraphState.State,
+  config?: LangGraphRunnableConfig
+): Promise<Partial<typeof GraphState.State>> => {
+  const log = getAgentGraphLogger(config);
 
-const nodeHelp = async (state: typeof GraphState.State): Promise<Partial<typeof GraphState.State>> => {
-  const header = [
-    `Orquestrador: ${state.orchestration.reason}`,
-    "",
-    ORCHESTRATOR_HELP_TEXT
-  ].join("\n");
-  return { output: header };
-};
+  if (state.planner_depth >= MAX_ORCHESTRATOR_INVOCATIONS) {
+    const forced: OrchestrationDecision = {
+      route: "done",
+      reason: `Stopped: max orchestrator invocations (${MAX_ORCHESTRATOR_INVOCATIONS})`
+    };
+    return {
+      orchestration: forced,
+      planner_depth: state.planner_depth + 1,
+      trace: ["[orquestrador] forced route=done (max planner invocations)"],
+      output: `[orquestrador] ${forced.reason}`
+    };
+  }
 
-const nodeRetriever = async (state: typeof GraphState.State): Promise<Partial<typeof GraphState.State>> => {
-  const { limit, dry_run } = state.orchestration;
-  try {
-    const result = await runAgentRetrieverWithResult({
-      limit,
-      dryRun: Boolean(dry_run)
+  const run = (): Promise<OrchestrationDecision> =>
+    decideWithLlm({
+      input: state.input,
+      trace: state.trace,
+      planner_depth: state.planner_depth
     });
 
-    if (result.mode === "dry_run") {
-      const lines = result.questions.map((q) => `- ${q.id} (${q.item_id}) ${q.text_preview.slice(0, 80)}`);
+  const orchestration = log
+    ? await log.withStep(
+        "graph_node_orquestrador",
+        run,
+        {
+          input_length: state.input.length,
+          planner_depth: state.planner_depth,
+          trace_lines: state.trace.length
+        }
+      )
+    : await run();
+
+  const nextDepth = state.planner_depth + 1;
+  const thoughtSnip = orchestration.thought?.replace(/\s+/g, " ").trim().slice(0, 280);
+  const traceLine = `[orquestrador] route=${orchestration.route}${thoughtSnip ? ` thought=${thoughtSnip}` : ""}`;
+
+  return {
+    orchestration,
+    planner_depth: nextDepth,
+    trace: [traceLine]
+  };
+};
+
+const nodeHelp = async (
+  state: typeof GraphState.State,
+  config?: LangGraphRunnableConfig
+): Promise<Partial<typeof GraphState.State>> => {
+  const log = getAgentGraphLogger(config);
+  const work = async (): Promise<Partial<typeof GraphState.State>> => {
+    const header = [
+      `Orquestrador: ${state.orchestration.reason}`,
+      "",
+      ORCHESTRATOR_HELP_TEXT
+    ].join("\n");
+    return {
+      output: header,
+      trace: ["[help] capabilities shown"]
+    };
+  };
+  return log ? log.withStep("graph_node_help", work, {}) : work();
+};
+
+const nodeRetriever = async (
+  state: typeof GraphState.State,
+  config?: LangGraphRunnableConfig
+): Promise<Partial<typeof GraphState.State>> => {
+  const log = getAgentGraphLogger(config);
+  const { limit, dry_run } = state.orchestration;
+
+  const work = async (): Promise<Partial<typeof GraphState.State>> => {
+    try {
+      const result = await runAgentRetrieverWithResult({
+        limit,
+        dryRun: Boolean(dry_run)
+      });
+
+      if (result.mode === "dry_run") {
+        const lines = result.questions.map((q) => `- ${q.id} (${q.item_id}) ${q.text_preview.slice(0, 80)}`);
+        return {
+          output: [`[agent_retriever] dry_run (${state.orchestration.reason})`, ...lines].join("\n"),
+          trace: [`[agent_retriever] dry_run would_process=${result.would_process}`]
+        };
+      }
+
       return {
-        output: [`[agent_retriever] dry_run (${state.orchestration.reason})`, ...lines].join("\n")
+        output: `[agent_retriever] wrote ${result.question_count} question(s) to ${result.output_path}\n(${state.orchestration.reason})`,
+        trace: [`[agent_retriever] ok wrote=${result.question_count} path=${result.output_path}`]
+      };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return {
+        output: `[agent_retriever] failed: ${msg}`,
+        trace: [`[agent_retriever] failed ${msg.slice(0, 200)}`]
       };
     }
+  };
 
-    return {
-      output: `[agent_retriever] wrote ${result.question_count} question(s) to ${result.output_path}\n(${state.orchestration.reason})`
-    };
-  } catch (error) {
-    return {
-      output: `[agent_retriever] failed: ${error instanceof Error ? error.message : String(error)}`
-    };
-  }
+  return log
+    ? log.withStep("graph_node_agent_retriever", work, {
+        limit: limit ?? null,
+        dry_run: Boolean(dry_run)
+      })
+    : work();
 };
 
-const nodeQuestions = async (state: typeof GraphState.State): Promise<Partial<typeof GraphState.State>> => {
+const nodeQuestions = async (
+  state: typeof GraphState.State,
+  config?: LangGraphRunnableConfig
+): Promise<Partial<typeof GraphState.State>> => {
+  const log = getAgentGraphLogger(config);
   const { limit, dry_run } = state.orchestration;
-  try {
-    const result = await runAgentQuestionsWithResult({
-      limit,
-      dryRun: Boolean(dry_run)
-    });
-    return { output: `${formatQuestionsRun(result)}\n(${state.orchestration.reason})` };
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    const hint =
-      code === "ENOENT"
-        ? " Tip: run agent_retriever first to create unanswered-questions.json."
-        : "";
-    return {
-      output: `[agent_questions] failed: ${error instanceof Error ? error.message : String(error)}${hint}`
-    };
-  }
+
+  const work = async (): Promise<Partial<typeof GraphState.State>> => {
+    try {
+      const result = await runAgentQuestionsWithResult({
+        limit,
+        dryRun: Boolean(dry_run)
+      });
+      const body = `${formatQuestionsRun(result)}\n(${state.orchestration.reason})`;
+      const traceLine =
+        result.mode === "dry_run"
+          ? `[agent_questions] dry_run would=${result.would_process}`
+          : `[agent_questions] ok answers=${result.run.total_answers}`;
+      return { output: body, trace: [traceLine] };
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      const hint =
+        code === "ENOENT"
+          ? " Tip: run agent_retriever first to create unanswered-questions.json."
+          : "";
+      const msg = error instanceof Error ? error.message : String(error);
+      return {
+        output: `[agent_questions] failed: ${msg}${hint}`,
+        trace: [`[agent_questions] failed ${msg.slice(0, 200)}`]
+      };
+    }
+  };
+
+  return log
+    ? log.withStep("graph_node_agent_questions", work, {
+        limit: limit ?? null,
+        dry_run: Boolean(dry_run)
+      })
+    : work();
 };
 
-const nodeVectorSearch = async (state: typeof GraphState.State): Promise<Partial<typeof GraphState.State>> => {
+const nodeVectorSearch = async (
+  state: typeof GraphState.State,
+  config?: LangGraphRunnableConfig
+): Promise<Partial<typeof GraphState.State>> => {
+  const log = getAgentGraphLogger(config);
   const k = state.orchestration.vector_k ?? 5;
-  try {
-    const store = await getVectorStore();
-    const docs = await store.similaritySearch(state.input, k);
-    const lines = docs.map((d, i) => `${i + 1}. score/metadata: ${JSON.stringify(d.metadata ?? {})}\n   ${String(d.pageContent).slice(0, 400)}`);
-    return {
-      output:
+
+  const work = async (): Promise<Partial<typeof GraphState.State>> => {
+    try {
+      const store = await getVectorStore();
+      const docs = await store.similaritySearch(state.input, k);
+      const lines = docs.map(
+        (d, i) => `${i + 1}. score/metadata: ${JSON.stringify(d.metadata ?? {})}\n   ${String(d.pageContent).slice(0, 400)}`
+      );
+      const out =
         lines.length > 0
           ? [`[vector_search] top ${docs.length} (${state.orchestration.reason})`, ...lines].join("\n\n")
-          : `[vector_search] no documents returned (k=${k}).`
-    };
-  } catch (error) {
-    return {
-      output: `[vector_search] failed: ${error instanceof Error ? error.message : String(error)}`
-    };
-  }
+          : `[vector_search] no documents returned (k=${k}).`;
+      return {
+        output: out,
+        trace: [`[vector_search] ok hits=${docs.length}`]
+      };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return {
+        output: `[vector_search] failed: ${msg}`,
+        trace: [`[vector_search] failed ${msg.slice(0, 200)}`]
+      };
+    }
+  };
+
+  return log ? log.withStep("graph_node_vector_search", work, { k }) : work();
 };
 
 const routeAfterOrchestrator = (state: typeof GraphState.State): OrchestrationDecision["route"] =>
@@ -175,11 +347,12 @@ const graphBuilder = new StateGraph(GraphState)
     help: "help",
     agent_retriever: "agent_retriever",
     agent_questions: "agent_questions",
-    vector_search: "vector_search"
+    vector_search: "vector_search",
+    done: END
   })
   .addEdge("help", END)
-  .addEdge("agent_retriever", END)
-  .addEdge("agent_questions", END)
-  .addEdge("vector_search", END);
+  .addEdge("agent_retriever", "orquestrador")
+  .addEdge("agent_questions", "orquestrador")
+  .addEdge("vector_search", "orquestrador");
 
 export const agentGraph = graphBuilder.compile();

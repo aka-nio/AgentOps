@@ -3,6 +3,7 @@ import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
+import type { LLMResult } from "@langchain/core/outputs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -72,6 +73,63 @@ export const tokenUsageFromLlmResult = (result: unknown): LlmTokenUsage | undefi
   return undefined;
 };
 
+/** Token usage from a LangChain `LLMResult` (e.g. `handleLLMEnd` callback). */
+export const tokenUsageFromLlmResultOutput = (output: LLMResult): LlmTokenUsage | undefined => {
+  const generations = output.generations;
+  if (Array.isArray(generations)) {
+    for (const batch of generations) {
+      if (!Array.isArray(batch)) {
+        continue;
+      }
+      for (const gen of batch) {
+        if (gen && typeof gen === "object" && "message" in gen) {
+          const u = tokenUsageFromLlmResult((gen as { message: unknown }).message);
+          if (u) {
+            return u;
+          }
+        }
+      }
+    }
+  }
+
+  const lo = output.llmOutput;
+  if (!lo || typeof lo !== "object") {
+    return undefined;
+  }
+
+  const o = lo as Record<string, unknown>;
+  const usage = o.usage;
+  if (usage && typeof usage === "object") {
+    const u = usage as Record<string, unknown>;
+    const ppt = u.prompt_tokens ?? u.input_tokens;
+    const cct = u.completion_tokens ?? u.output_tokens;
+    const ttt = u.total_tokens;
+    if (typeof ppt === "number" || typeof cct === "number" || typeof ttt === "number") {
+      return {
+        promptTokens: typeof ppt === "number" ? ppt : undefined,
+        completionTokens: typeof cct === "number" ? cct : undefined,
+        totalTokens:
+          typeof ttt === "number"
+            ? ttt
+            : typeof ppt === "number" && typeof cct === "number"
+              ? ppt + cct
+              : undefined
+      };
+    }
+  }
+
+  const tu = o.tokenUsage as LlmTokenUsage | undefined;
+  if (tu && (tu.totalTokens != null || tu.promptTokens != null || tu.completionTokens != null)) {
+    return {
+      promptTokens: tu.promptTokens,
+      completionTokens: tu.completionTokens,
+      totalTokens: tu.totalTokens
+    };
+  }
+
+  return undefined;
+};
+
 const summarizeInput = (input: unknown): unknown => {
   if (input !== null && typeof input === "object" && !Array.isArray(input)) {
     const o = input as Record<string, unknown>;
@@ -88,7 +146,7 @@ const summarizeInput = (input: unknown): unknown => {
   return input;
 };
 
-type LlmRollup = {
+export type LlmTokenRollup = {
   prompt: number;
   completion: number;
   total: number;
@@ -100,11 +158,52 @@ export class AgentRunLogger {
   readonly startedAtMs: number = Date.now();
   readonly agent: string;
   private readonly runMeta: Record<string, unknown>;
-  private llmRollup: LlmRollup = { prompt: 0, completion: 0, total: 0, interactions: 0 };
+  private llmRollup: LlmTokenRollup = { prompt: 0, completion: 0, total: 0, interactions: 0 };
 
   constructor(agent: string, runMeta: Record<string, unknown> = {}) {
     this.agent = agent;
     this.runMeta = runMeta;
+  }
+
+  /** Cumulative LLM token counters for this run (updated by `withLlmStep` and graph callbacks). */
+  getLlmTokenRollup(): LlmTokenRollup {
+    return { ...this.llmRollup };
+  }
+
+  /**
+   * Records token usage from a LangChain `handleLLMEnd` payload and emits a `step` line
+   * (`graph_llm_usage`) so each model call is visible in JSONL even when nested agents run.
+   */
+  async logLlmUsageFromCallback(
+    output: LLMResult,
+    durationMs: number,
+    fields: Record<string, unknown> = {}
+  ): Promise<void> {
+    const usage = tokenUsageFromLlmResultOutput(output);
+    this.addLlmRollup(usage);
+
+    const tokenFields: Record<string, unknown> = {};
+    if (usage) {
+      const tokens: Record<string, number> = {};
+      if (typeof usage.promptTokens === "number") {
+        tokens.prompt = usage.promptTokens;
+      }
+      if (typeof usage.completionTokens === "number") {
+        tokens.completion = usage.completionTokens;
+      }
+      let total = usage.totalTokens;
+      if (typeof total !== "number" && typeof usage.promptTokens === "number" && typeof usage.completionTokens === "number") {
+        total = usage.promptTokens + usage.completionTokens;
+      }
+      if (typeof total === "number") {
+        tokens.total = total;
+      }
+      if (Object.keys(tokens).length > 0) {
+        tokenFields.tokens = tokens;
+      }
+    }
+
+    await this.step("graph_llm_usage", durationMs, { ...fields, ...tokenFields, source: "langchain_callback" });
   }
 
   private addLlmRollup(usage: LlmTokenUsage | undefined): void {

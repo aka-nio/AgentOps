@@ -4,7 +4,7 @@ Monorepo for an agentic system built around Mercado Livre question handling. It 
 
 ## Projects
 
-### `ml_intermediate_api` — API Gateway (Port 3000)
+### `ml_intermediate_api` — API Gateway (Port 3001)
 
 A Fastify REST API that acts as the intermediate layer between agents/clients and external services. It handles authentication, proxies Mercado Livre API calls, and persists question data locally.
 
@@ -25,7 +25,7 @@ See [`ml_intermediate_api/docs/API/`](ml_intermediate_api/docs/API/) for full en
 
 ---
 
-### `ml_agents` — Agent Service (Port 3002)
+### `ml_agents` — Agent Service (Port 3000)
 
 A LangChain/LangGraph agent service that orchestrates intelligent workflows. It exposes HTTP endpoints for invoking the agent graph and performing semantic vector search over embeddings stored in MongoDB Atlas.
 
@@ -60,7 +60,7 @@ See [`ml_agents/docs/`](ml_agents/docs/) for agent usage documentation.
 React Test Client (frontTest)
          │
          ▼
-  ml_agents :3002                  ml_intermediate_api :3000
+  ml_agents :3000                  ml_intermediate_api :3001
   ┌─────────────────────┐          ┌────────────────────────┐
   │ LangGraph Agent     │─────────>│ Fastify Gateway        │
   │ Tools:              │          │ - External Auth proxy  │
@@ -87,7 +87,30 @@ React Test Client (frontTest)
 
 ## Getting Started
 
-Each subproject has its own environment variables and Docker setup. Refer to the individual READMEs:
+1. Install dependencies once from the monorepo root:
+
+```bash
+npm install
+```
+
+2. Prepare env and database requirements from the service READMEs:
+- `ml_intermediate_api` (PostgreSQL, Prisma, API env vars)
+- `ml_agents` (LLM + MongoDB env vars)
+- `ml_agents/frontTest` (Vite `VITE_*` env vars)
+
+3. Start the three apps together from the root:
+
+```bash
+npm run dev
+```
+
+Default local ports:
+- `ml_agents`: `3000`
+- `ml_intermediate_api`: `3001`
+- `frontTest` (Vite dev server): `5173` unless overridden
+
+Each subproject still has its own environment variables and Docker setup details. Refer to:
 
 - [`ml_intermediate_api/README.md`](ml_intermediate_api/README.md)
 - [`ml_agents/README.md`](ml_agents/README.md)
+- [`ml_agents/frontTest/README.md`](ml_agents/frontTest/README.md)
