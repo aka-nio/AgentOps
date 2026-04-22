@@ -2,7 +2,7 @@
 
 This guide explains how to run the LangGraph orchestrator from the command line.
 
-The orchestrator routes natural-language requests to one step at a time (`agent_retriever`, `agent_questions`, `vector_search`, `help`) and can chain steps in a single execution (for example retriever -> questions).
+The orchestrator routes natural-language requests to one step at a time (`agent_retriever`, `agent_questions`, `agent_deals`, `vector_search`, `help`) and can chain steps in a single execution (for example retriever -> questions).
 
 **Graph topology:** see the Mermaid diagram and notes in the [ML Agents documentation index](../README.md#agent-graph) (source: `ml_agents/src/graph/agent-graph.ts`).
 

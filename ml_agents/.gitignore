@@ -51,3 +51,4 @@ Thumbs.db
 # Agent generated outputs
 src/agent_retriever/outputs/
 src/agent_questions/outputs/
+src/agent_deals/outputs/

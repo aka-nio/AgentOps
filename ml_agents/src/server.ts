@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { z } from "zod";
 import { runAgentQuestionsWithResult } from "./agent_questions/agent.js";
+import { runAgentDealsWithResult } from "./agent_deals/agent.js";
 import { PreparedQuestionsPayloadSchema } from "./agent_questions/ag_questions_type.js";
 import { env } from "./config/env.js";
 import { withAgentRunLog } from "./lib/agent-run-log.js";
@@ -23,6 +24,11 @@ const agentQuestionsRunSchema = z.object({
   persist: z.boolean().optional(),
   /** When omitted, the server loads `src/agent_retriever/outputs/unanswered-questions.json` relative to the agent package (may be missing until the retriever has run). */
   payload: PreparedQuestionsPayloadSchema.optional()
+});
+
+const agentDealsRunSchema = z.object({
+  dryRun: z.boolean().optional(),
+  promotionType: z.string().max(64).optional()
 });
 
 const parseJsonBody = async <T>(
@@ -93,6 +99,15 @@ const server = createServer(async (req, res) => {
         dryRun: body.dryRun ?? false,
         persist: body.persist,
         prepared: body.payload
+      });
+      return sendJson(res, 200, result);
+    }
+
+    if (req.method === "POST" && req.url === "/agent-deals/run") {
+      const body = await parseJsonBody(req, agentDealsRunSchema);
+      const result = await runAgentDealsWithResult({
+        dryRun: body.dryRun ?? false,
+        promotionType: body.promotionType
       });
       return sendJson(res, 200, result);
     }

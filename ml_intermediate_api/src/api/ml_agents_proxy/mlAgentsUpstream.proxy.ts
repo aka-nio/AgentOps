@@ -55,6 +55,22 @@ export default async function mlAgentsUpstreamProxy(fastify: FastifyInstance) {
     }
   );
 
+  fastify.post("/agent-deals/run", async (request: FastifyRequest, reply: FastifyReply) => {
+    const base = requireUpstreamBase();
+    if (!base) {
+      return noUpstream(reply);
+    }
+
+    return forwardJson(reply, `${base}/agent-deals/run`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json"
+      },
+      body: JSON.stringify(request.body ?? {})
+    });
+  });
+
   fastify.post("/invoke", async (request: FastifyRequest, reply: FastifyReply) => {
     const base = requireUpstreamBase();
     if (!base) {

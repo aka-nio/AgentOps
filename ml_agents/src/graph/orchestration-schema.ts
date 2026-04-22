@@ -3,6 +3,7 @@ import { z } from "zod";
 export const OrchestrationRouteSchema = z.enum([
   "agent_retriever",
   "agent_questions",
+  "agent_deals",
   "vector_search",
   "help",
   /** Goal satisfied or no further tool step; graph ends. */
@@ -18,6 +19,8 @@ export const OrchestrationDecisionSchema = z.object({
   dry_run: z.boolean().optional(),
   /** For vector_search only. */
   vector_k: z.number().int().positive().max(20).optional(),
+  /** For agent_deals: optional filter (e.g. DEAL). Omit to list all invitation types. */
+  promotion_type: z.string().max(64).optional(),
   /** Short chain-of-thought for logs / debugging (not shown to end users by default). */
   thought: z.string().max(1500).optional(),
   reason: z.string().max(500)
@@ -47,6 +50,10 @@ export const inferRouteFromHeuristics = (input: string, trace: readonly string[]
 
   if (traceHas(trace, "[vector_search]")) {
     return { route: "done", reason: "heuristic: vector search step completed" };
+  }
+
+  if (traceHas(trace, "[agent_deals]")) {
+    return { route: "done", reason: "heuristic: agent_deals step completed" };
   }
 
   if (traceHas(trace, "[agent_retriever]") && traceHas(trace, "failed")) {
@@ -79,6 +86,15 @@ export const inferRouteFromHeuristics = (input: string, trace: readonly string[]
     /\b(find|encontre).{0,40}\b(in (the )?docs|na base|nos documentos)\b/i.test(t)
   ) {
     return { route: "vector_search", reason: "heuristic: vector / semantic search intent" };
+  }
+
+  if (
+    /\b(list|listar|show|mostrar|available|dispon(í|i)ve|quais|what)\b/i.test(t) &&
+    /\b(promo(ç|c)(ã|a)ões|promotions?|deals?|campanhas?|ofertas?|convites?|seller[- ]?promo|central de promo)\b/i.test(
+      t
+    )
+  ) {
+    return { route: "agent_deals", reason: "heuristic: list seller promotion invitations" };
   }
 
   if (combinedFetchAndAnswerIntent(t) && !traceHas(trace, "[agent_retriever]")) {
@@ -120,7 +136,10 @@ export const ORCHESTRATOR_HELP_TEXT = [
   "3) vector_search — Busca semântica nos embeddings MongoDB Atlas (requer `OPENAI_API_KEY` e índice vetorial configurado).",
   "   Ex.: \"vector search for shipping policy\", \"busca semântica sobre garantia\".",
   "",
-  "4) help — Esta mensagem.",
+  "4) agent_deals — Lista convites de promoção do vendedor no Mercado Livre (DEAL, campanhas, etc.) via `GET /api/mercado-livre/seller-promotions` e grava `src/agent_deals/outputs/seller-promotions.json`.",
+  "   Ex.: \"list available promotions\", \"listar campanhas que posso participar\", \"quais promoções posso participar\".",
+  "",
+  "5) help — Esta mensagem.",
   "",
   "O orquestrador pode **encadear** passos (retriever → questions) numa mesma execução até concluir ou atingir o limite de planejamento.",
   "Para um fluxo típico numa frase: \"busque perguntas não respondidas e rascunhe respostas\"."

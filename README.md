@@ -20,6 +20,7 @@ A Fastify REST API that acts as the intermediate layer between agents/clients an
 |--------|------|-------------|
 | `POST` | `/api/external-auth/token` | Authenticate against upstream auth, returns JWT |
 | `GET` | `/api/mercado-livre/questions` | Fetch unanswered seller questions from Mercado Livre |
+| `GET` | `/api/mercado-livre/seller-promotions` | List seller promotion invitations (all types; optional `promotion_type` filter) |
 
 See [`ml_intermediate_api/docs/API/`](ml_intermediate_api/docs/API/) for full endpoint documentation.
 
@@ -42,12 +43,15 @@ A LangChain/LangGraph agent service that orchestrates intelligent workflows. It 
 |--------|------|-------------|
 | `GET` | `/health` | Health check, reports vector store readiness |
 | `POST` | `/invoke` | Invoke the agent graph with an input text |
+| `POST` | `/agent-deals/run` | Run the deals lister (seller promotion invitations) |
 | `POST` | `/vectors/search` | Semantic similarity search over stored embeddings |
 
 **CLI scripts:**
 ```bash
 npm run agent:retriever       # Fetch unanswered questions, save to JSON
 npm run agent:retriever:dry   # Dry-run, logs output without writing
+npm run agent:deals           # List promotion invitations, save to JSON
+npm run agent:deals:dry       # Dry-run deals lister
 ```
 
 See [`ml_agents/docs/`](ml_agents/docs/) for agent usage documentation.

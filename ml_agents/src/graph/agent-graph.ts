@@ -3,6 +3,9 @@ import { ChatOpenAI } from "@langchain/openai";
 import { runAgentRetrieverWithResult } from "../agent_retriever/agent.js";
 import { runAgentQuestionsWithResult } from "../agent_questions/agent.js";
 import type { AgentQuestionsRunResult } from "../agent_questions/agent.js";
+import { runAgentDealsWithResult } from "../agent_deals/agent.js";
+import type { AgentDealsRunResult } from "../agent_deals/agent.js";
+import { formatUnknownErrorForLog } from "../agent_deals/diagnostics.js";
 import { env } from "../config/env.js";
 import { getVectorStore } from "../lib/vector-store.js";
 import { getAgentGraphLogger } from "./graph-logger-context.js";
@@ -24,9 +27,10 @@ const ORCHESTRATOR_SYSTEM = [
   "Routes:",
   "- agent_retriever: Fetch UNANSWERED Mercado Livre buyer questions and write unanswered-questions.json.",
   "- agent_questions: Draft seller replies from unanswered-questions.json (requires OPENAI_API_KEY).",
+  "- agent_deals: List promotion invitations for the seller (Mercado Livre seller-promotions) and write seller-promotions.json.",
   "- vector_search: Semantic search over the MongoDB Atlas vector index.",
   "- help: One-shot explanation of capabilities (only when trace is still empty and the user asks what you can do).",
-  "- done: Stop the loop — use after questions ran successfully, after vector_search, when nothing else is needed, or when stuck.",
+  "- done: Stop the loop — use after questions ran successfully, after vector_search, after agent_deals, when nothing else is needed, or when stuck.",
   "",
   "Chain-of-thought:",
   "- Fill `thought` with a brief reasoning (what you inferred, what is missing, what should run next).",
@@ -38,6 +42,8 @@ const ORCHESTRATOR_SYSTEM = [
   "- After `[agent_questions] ok` or questions dry_run in trace, choose **done**.",
   "- If trace shows `[agent_retriever] dry_run`, choose **done** (nothing was written for questions to consume).",
   "- If the user only wanted vector search and trace shows vector results, choose **done**.",
+  "- If the user asked for **promotions/deals/campaigns** to join, use **agent_deals**; after `[agent_deals] ok` or dry_run in trace, choose **done**.",
+  "- For agent_deals you may set `promotion_type` (e.g. \"DEAL\") to filter; omit to list every invitation type.",
   "- Extract limit (1–25) or dry_run only when clearly requested.",
   "- For vector_search, you may set vector_k (1–20).",
   "- If unsure and trace is empty, prefer **help** over random tools."
@@ -96,6 +102,26 @@ const decideWithLlm = async (state: {
   } catch {
     return inferRouteFromHeuristics(state.input, state.trace);
   }
+};
+
+const formatDealsRun = (result: AgentDealsRunResult): string => {
+  if (result.mode === "dry_run") {
+    const lines = result.sample.map(
+      (p) => `- ${p.id} (${p.type}) ${p.status}${p.name ? ` — ${p.name}` : ""}`
+    );
+    return [
+      `[agent_deals] dry_run: would list ${result.would_list} row(s) filter=${result.promotion_type_filter ?? "none"}`,
+      ...lines
+    ].join("\n");
+  }
+  const { response } = result;
+  const head = `${response.results.length} promotion(s)`;
+  const lines = response.results.map(
+    (p) =>
+      `- ${p.id} type=${p.type} status=${p.status}` +
+      (typeof p.name === "string" ? ` name=${p.name}` : "")
+  );
+  return [head, ...lines, `written: ${result.output_path}`].join("\n");
 };
 
 const formatQuestionsRun = (result: AgentQuestionsRunResult): string => {
@@ -299,6 +325,48 @@ const nodeQuestions = async (
     : work();
 };
 
+const nodeDeals = async (
+  state: typeof GraphState.State,
+  config?: LangGraphRunnableConfig
+): Promise<Partial<typeof GraphState.State>> => {
+  const log = getAgentGraphLogger(config);
+  const { dry_run, promotion_type } = state.orchestration;
+
+  const work = async (): Promise<Partial<typeof GraphState.State>> => {
+    try {
+      const result = await runAgentDealsWithResult({
+        promotionType: promotion_type,
+        dryRun: Boolean(dry_run)
+      });
+      const body = `${formatDealsRun(result)}\n(${state.orchestration.reason})`;
+      const traceLine =
+        result.mode === "dry_run"
+          ? `[agent_deals] dry_run would_list=${result.would_list}`
+          : `[agent_deals] ok count=${result.response.results.length} path=${result.output_path}`;
+      return { output: body, trace: [traceLine] };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      const diagnostic = formatUnknownErrorForLog(error);
+      console.error("[agent_deals] graph node error", {
+        message: msg,
+        diagnostic,
+        ...(error instanceof Error && error.stack ? { stack: error.stack } : {})
+      });
+      return {
+        output: `[agent_deals] failed: ${msg}`,
+        trace: [`[agent_deals] failed ${msg.slice(0, 400)}`]
+      };
+    }
+  };
+
+  return log
+    ? log.withStep("graph_node_agent_deals", work, {
+        promotion_type: promotion_type ?? null,
+        dry_run: Boolean(dry_run)
+      })
+    : work();
+};
+
 const nodeVectorSearch = async (
   state: typeof GraphState.State,
   config?: LangGraphRunnableConfig
@@ -342,17 +410,20 @@ const graphBuilder = new StateGraph(GraphState)
   .addNode("agent_retriever", nodeRetriever)
   .addNode("agent_questions", nodeQuestions)
   .addNode("vector_search", nodeVectorSearch)
+  .addNode("agent_deals", nodeDeals)
   .addEdge(START, "orquestrador")
   .addConditionalEdges("orquestrador", routeAfterOrchestrator, {
     help: "help",
     agent_retriever: "agent_retriever",
     agent_questions: "agent_questions",
+    agent_deals: "agent_deals",
     vector_search: "vector_search",
     done: END
   })
   .addEdge("help", END)
   .addEdge("agent_retriever", "orquestrador")
   .addEdge("agent_questions", "orquestrador")
+  .addEdge("agent_deals", "orquestrador")
   .addEdge("vector_search", "orquestrador");
 
 export const agentGraph = graphBuilder.compile();
