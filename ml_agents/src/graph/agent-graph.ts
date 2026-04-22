@@ -6,12 +6,14 @@ import type { AgentQuestionsRunResult } from "../agent_questions/agent.js";
 import { runAgentDealsWithResult } from "../agent_deals/agent.js";
 import type { AgentDealsRunResult } from "../agent_deals/agent.js";
 import { formatUnknownErrorForLog } from "../agent_deals/diagnostics.js";
+import { fetch_ml_sku_by_anuncio_id } from "../agent_deals/tools/context_item_sku.js";
 import { env } from "../config/env.js";
 import { getVectorStore } from "../lib/vector-store.js";
 import { getAgentGraphLogger } from "./graph-logger-context.js";
 import {
   OrchestrationDecisionSchema,
   type OrchestrationDecision,
+  extractMercadoLivreItemIdFromText,
   inferRouteFromHeuristics,
   ORCHESTRATOR_HELP_TEXT
 } from "./orchestration-schema.js";
@@ -28,9 +30,10 @@ const ORCHESTRATOR_SYSTEM = [
   "- agent_retriever: Fetch UNANSWERED Mercado Livre buyer questions and write unanswered-questions.json.",
   "- agent_questions: Draft seller replies from unanswered-questions.json (requires OPENAI_API_KEY).",
   "- agent_deals: List promotion invitations for the seller (Mercado Livre seller-promotions) and write seller-promotions.json.",
+  "- fetch_item_sku: Look up seller SKU(s) for one listing (anúncio) by item id (MLB…/MLA…) via the proxy items API. Set `anuncio_id` when the id is explicit; otherwise it can be inferred from the message or from item lines in the trace (e.g. question lines with item_id).",
   "- vector_search: Semantic search over the MongoDB Atlas vector index.",
   "- help: One-shot explanation of capabilities (only when trace is still empty and the user asks what you can do).",
-  "- done: Stop the loop — use after questions ran successfully, after vector_search, after agent_deals, when nothing else is needed, or when stuck.",
+  "- done: Stop the loop — use after questions ran successfully, after vector_search, after agent_deals, after fetch_item_sku when that was the goal, when nothing else is needed, or when stuck.",
   "",
   "Chain-of-thought:",
   "- Fill `thought` with a brief reasoning (what you inferred, what is missing, what should run next).",
@@ -44,6 +47,8 @@ const ORCHESTRATOR_SYSTEM = [
   "- If the user only wanted vector search and trace shows vector results, choose **done**.",
   "- If the user asked for **promotions/deals/campaigns** to join, use **agent_deals**; after `[agent_deals] ok` or dry_run in trace, choose **done**.",
   "- For agent_deals you may set `promotion_type` (e.g. \"DEAL\") to filter; omit to list every invitation type.",
+  "- If the user asks for **SKU / seller code / código do anúncio** for a listing, or the request implies item context (listing id in the message or trace), use **fetch_item_sku** with `anuncio_id` when you can read an `ML*…` id. After `[fetch_item_sku] ok` or failed in trace, choose **done** unless they also asked for retriever/questions/deals in the same run and those are not finished yet.",
+  "- Multi-step example: retriever → questions → **fetch_item_sku** when the user wants drafts **and** the SKU for a specific `anuncio_id` (set `anuncio_id` from their text).",
   "- Extract limit (1–25) or dry_run only when clearly requested.",
   "- For vector_search, you may set vector_k (1–20).",
   "- If unsure and trace is empty, prefer **help** over random tools."
@@ -122,6 +127,20 @@ const formatDealsRun = (result: AgentDealsRunResult): string => {
       (typeof p.name === "string" ? ` name=${p.name}` : "")
   );
   return [head, ...lines, `written: ${result.output_path}`].join("\n");
+};
+
+const resolveAnuncioIdForSkuFetch = (
+  orchestration: OrchestrationDecision,
+  input: string,
+  trace: readonly string[]
+): string | undefined => {
+  const fromDecision = orchestration.anuncio_id?.trim();
+  if (fromDecision) {
+    return fromDecision;
+  }
+  return (
+    extractMercadoLivreItemIdFromText(input) ?? extractMercadoLivreItemIdFromText(trace.join("\n"))
+  );
 };
 
 const formatQuestionsRun = (result: AgentQuestionsRunResult): string => {
@@ -295,7 +314,8 @@ const nodeQuestions = async (
     try {
       const result = await runAgentQuestionsWithResult({
         limit,
-        dryRun: Boolean(dry_run)
+        dryRun: Boolean(dry_run),
+        includeItemSkuInListingContext: true
       });
       const body = `${formatQuestionsRun(result)}\n(${state.orchestration.reason})`;
       const traceLine =
@@ -401,6 +421,53 @@ const nodeVectorSearch = async (
   return log ? log.withStep("graph_node_vector_search", work, { k }) : work();
 };
 
+const nodeFetchItemSku = async (
+  state: typeof GraphState.State,
+  config?: LangGraphRunnableConfig
+): Promise<Partial<typeof GraphState.State>> => {
+  const log = getAgentGraphLogger(config);
+
+  const work = async (): Promise<Partial<typeof GraphState.State>> => {
+    const anuncio_id = resolveAnuncioIdForSkuFetch(state.orchestration, state.input, state.trace);
+    if (!anuncio_id) {
+      return {
+        output: [
+          "[fetch_item_sku] failed: could not resolve anuncio_id.",
+          "Include a Mercado Livre listing id (e.g. MLB1234567890) in the request, or set `anuncio_id` in the plan when item context is only implicit."
+        ].join(" "),
+        trace: ["[fetch_item_sku] failed missing anuncio_id"]
+      };
+    }
+
+    try {
+      const result = await fetch_ml_sku_by_anuncio_id.invoke({ anuncio_id });
+      const detail = result.sku_not_found
+        ? "no seller SKU on item payload (sku_not_found)"
+        : `skus: ${result.skus.join(", ")}`;
+      const body = [
+        `[fetch_item_sku] anuncio_id=${result.anuncio_id} item_id=${result.item_id} ${detail}`,
+        `(${state.orchestration.reason})`
+      ].join("\n");
+      const traceLine = result.sku_not_found
+        ? `[fetch_item_sku] ok anuncio_id=${anuncio_id} sku_not_found`
+        : `[fetch_item_sku] ok anuncio_id=${anuncio_id} skus=${result.skus.join("|")}`;
+      return { output: body, trace: [traceLine] };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return {
+        output: `[fetch_item_sku] failed: ${msg}\n(${state.orchestration.reason})`,
+        trace: [`[fetch_item_sku] failed ${msg.slice(0, 240)}`]
+      };
+    }
+  };
+
+  const meta = {
+    anuncio_id:
+      resolveAnuncioIdForSkuFetch(state.orchestration, state.input, state.trace) ?? null
+  };
+  return log ? log.withStep("graph_node_fetch_item_sku", work, meta) : work();
+};
+
 const routeAfterOrchestrator = (state: typeof GraphState.State): OrchestrationDecision["route"] =>
   state.orchestration.route;
 
@@ -411,12 +478,14 @@ const graphBuilder = new StateGraph(GraphState)
   .addNode("agent_questions", nodeQuestions)
   .addNode("vector_search", nodeVectorSearch)
   .addNode("agent_deals", nodeDeals)
+  .addNode("fetch_item_sku", nodeFetchItemSku)
   .addEdge(START, "orquestrador")
   .addConditionalEdges("orquestrador", routeAfterOrchestrator, {
     help: "help",
     agent_retriever: "agent_retriever",
     agent_questions: "agent_questions",
     agent_deals: "agent_deals",
+    fetch_item_sku: "fetch_item_sku",
     vector_search: "vector_search",
     done: END
   })
@@ -424,6 +493,7 @@ const graphBuilder = new StateGraph(GraphState)
   .addEdge("agent_retriever", "orquestrador")
   .addEdge("agent_questions", "orquestrador")
   .addEdge("agent_deals", "orquestrador")
+  .addEdge("fetch_item_sku", "orquestrador")
   .addEdge("vector_search", "orquestrador");
 
 export const agentGraph = graphBuilder.compile();

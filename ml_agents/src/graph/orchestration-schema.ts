@@ -4,6 +4,8 @@ export const OrchestrationRouteSchema = z.enum([
   "agent_retriever",
   "agent_questions",
   "agent_deals",
+  /** Resolve seller SKU(s) for a listing id (anúncio) via the proxy items API. */
+  "fetch_item_sku",
   "vector_search",
   "help",
   /** Goal satisfied or no further tool step; graph ends. */
@@ -21,12 +23,33 @@ export const OrchestrationDecisionSchema = z.object({
   vector_k: z.number().int().positive().max(20).optional(),
   /** For agent_deals: optional filter (e.g. DEAL). Omit to list all invitation types. */
   promotion_type: z.string().max(64).optional(),
+  /**
+   * For `fetch_item_sku`: Mercado Livre listing / item id (e.g. MLB1234567890). May be omitted
+   * if the user message or trace contains a single extractable `ML*…` id.
+   */
+  anuncio_id: z.string().min(3).max(32).optional(),
   /** Short chain-of-thought for logs / debugging (not shown to end users by default). */
   thought: z.string().max(1500).optional(),
   reason: z.string().max(500)
 });
 
 export type OrchestrationDecision = z.infer<typeof OrchestrationDecisionSchema>;
+
+/** Mercado Livre public item / listing id (e.g. MLB1234567890, MLA1234567890). */
+const MERCADO_LIVRE_ITEM_ID_RE = /\b(ML[A-Z]{1,3}\d{6,})\b/;
+
+/**
+ * Picks the first listing id in free text (user message or execution trace), for SKU lookup.
+ */
+export function extractMercadoLivreItemIdFromText(text: string): string | undefined {
+  const m = text.match(MERCADO_LIVRE_ITEM_ID_RE);
+  return m ? m[1] : undefined;
+}
+
+const skuIntentInText = (text: string): boolean =>
+  /\bsku\b/i.test(text) ||
+  /\b(get|buscar|fetch|qual|what).{0,24}\b(sku|c(ó|o)digo)\b/i.test(text) ||
+  /\bc(ó|o)digo(s)?\s+(do|da|de)\s+(produto|seller|an(ú|u)ncio|listagem|item)\b/i.test(text);
 
 const normalize = (s: string): string => s.toLowerCase();
 
@@ -44,7 +67,20 @@ const combinedFetchAndAnswerIntent = (t: string): boolean =>
 export const inferRouteFromHeuristics = (input: string, trace: readonly string[] = []): OrchestrationDecision => {
   const t = normalize(input);
 
+  if (traceHas(trace, "[fetch_item_sku]")) {
+    return { route: "done", reason: "heuristic: fetch_item_sku step completed" };
+  }
+
   if (traceHas(trace, "[agent_questions]")) {
+    const id =
+      extractMercadoLivreItemIdFromText(input) ?? extractMercadoLivreItemIdFromText(trace.join("\n"));
+    if (id && skuIntentInText(input) && !traceHas(trace, "[fetch_item_sku]")) {
+      return {
+        route: "fetch_item_sku",
+        anuncio_id: id,
+        reason: "heuristic: after questions, fetch SKU for listing id (from message or item context in trace)"
+      };
+    }
     return { route: "done", reason: "heuristic: agent_questions already ran (success, dry-run, or failure)" };
   }
 
@@ -79,6 +115,23 @@ export const inferRouteFromHeuristics = (input: string, trace: readonly string[]
     (t.trim().length < 4 && trace.length === 0)
   ) {
     return { route: "help", reason: "heuristic: help or very short message" };
+  }
+
+  {
+    const id = extractMercadoLivreItemIdFromText(input);
+    if (
+      id &&
+      skuIntentInText(input) &&
+      !traceHas(trace, "[fetch_item_sku]") &&
+      !traceHas(trace, "[agent_retriever]") &&
+      !traceHas(trace, "[agent_questions]")
+    ) {
+      return {
+        route: "fetch_item_sku",
+        anuncio_id: id,
+        reason: "heuristic: listing id and SKU / código intent (no retriever/questions leg yet)"
+      };
+    }
   }
 
   if (
@@ -139,8 +192,11 @@ export const ORCHESTRATOR_HELP_TEXT = [
   "4) agent_deals — Lista convites de promoção do vendedor no Mercado Livre (DEAL, campanhas, etc.) via `GET /api/mercado-livre/seller-promotions` e grava `src/agent_deals/outputs/seller-promotions.json`.",
   "   Ex.: \"list available promotions\", \"listar campanhas que posso participar\", \"quais promoções posso participar\".",
   "",
+  "4b) fetch_item_sku — Consulta o SKU do vendedor para um anúncio (item id MLB…/MLA…) via `GET /api/mercado-livre/items/:id` no proxy.",
+  "   Ex.: \"qual o SKU do MLB1234567890?\", após rascunhar respostas: \"e o código do anúncio MLB…\" (id pode vir da mensagem ou do rastro com contexto de item).",
+  "",
   "5) help — Esta mensagem.",
   "",
-  "O orquestrador pode **encadear** passos (retriever → questions) numa mesma execução até concluir ou atingir o limite de planejamento.",
+  "O orquestrador pode **encadear** passos (retriever → questions, e fetch_item_sku quando o pedido incluir SKU/código de um anúncio) numa mesma execução até concluir ou atingir o limite de planejamento.",
   "Para um fluxo típico numa frase: \"busque perguntas não respondidas e rascunhe respostas\"."
 ].join("\n");

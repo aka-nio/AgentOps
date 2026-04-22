@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { ChatOpenAI } from "@langchain/openai";
 import { z } from "zod";
 import { type MercadoLivreItemPayload, type MercadoLivreQuestion } from "../agent_retriever/types.js";
+import { extractSkusFromMlItemPayload } from "../agent_deals/tools/context_item_sku.js";
 import { env } from "../config/env.js";
 import { fetch_ml_item } from "../agent_retriever/tools/items.js";
 import { getAgentRunLogger, withAgentRunLog } from "../lib/agent-run-log.js";
@@ -36,7 +37,12 @@ export type {
   RunAgentQuestionsOptions
 } from "./ag_questions_type.js";
 
-const buildPrompt = (rules: string, question: MercadoLivreQuestion, itemContext?: string): string => {
+const buildPrompt = (
+  rules: string,
+  question: MercadoLivreQuestion,
+  itemContext?: string,
+  itemSku = ""
+): string => {
   return [
     "You are agent_questions.",
     "",
@@ -61,6 +67,7 @@ const buildPrompt = (rules: string, question: MercadoLivreQuestion, itemContext?
     "Question:",
     `- id: ${question.id}`,
     `- item_id: ${question.item_id}`,
+    `- sku: ${itemSku}`,
     `- status: ${question.status}`,
     `- text: ${question.text || "(empty)"}`,
     `- date_created: ${question.date_created}`
@@ -78,11 +85,13 @@ const toHumanHandoff = (
   question: MercadoLivreQuestion,
   reason: string,
   used_item_context = false,
-  item_context_error?: string
+  item_context_error?: string,
+  sku = ""
 ): DraftedAnswer & DraftAnswerMeta => ({
   question,
   answer: "",
   used_item_context,
+  sku,
   ...(item_context_error ? { item_context_error } : {}),
   handoff_reason: reason
 });
@@ -187,7 +196,31 @@ const summarizeItemPayload = (item: MercadoLivreItemPayload): string => {
   return lines.join("\n").slice(0, 8000);
 };
 
-const draftAnswer = async (question: MercadoLivreQuestion, rules: string): Promise<DraftedAnswer & DraftAnswerMeta> => {
+const buildListingContextForPrompt = (
+  item: MercadoLivreItemPayload,
+  includeSku: boolean
+): { listingContext: string; sku: string } => {
+  const skus = extractSkusFromMlItemPayload(item as Record<string, unknown>);
+  const sku = skus.length > 0 ? skus.join(", ") : "";
+  const body = summarizeItemPayload(item);
+  if (!includeSku) {
+    return { listingContext: body, sku };
+  }
+  const skuBlock =
+    skus.length > 0
+      ? `Seller SKU(s) from this listing: ${skus.join(", ")}`
+      : "Seller SKU(s) from this listing: (not present in item payload).";
+  return {
+    listingContext: [skuBlock, body].join("\n\n").slice(0, 8000),
+    sku
+  };
+};
+
+const draftAnswer = async (
+  question: MercadoLivreQuestion,
+  rules: string,
+  itemContextOptions: { includeItemSkuInListingContext: boolean }
+): Promise<DraftedAnswer & DraftAnswerMeta> => {
   const normalizedQuestionText = (question.text ?? "").trim();
   if (FREIGHT_QUESTION_RE.test(normalizedQuestionText)) {
     return toHumanHandoff(question, "freight_question_human_required");
@@ -200,31 +233,34 @@ const draftAnswer = async (question: MercadoLivreQuestion, rules: string): Promi
   let used_item_context = false;
   let item_context_error: string | undefined;
   let handoff_reason: string | undefined;
+  let resolved_sku = "";
 
   const shouldForceItemLookup = asksMoreUnits || SPECIFIC_INFO_QUESTION_RE.test(normalizedQuestionText);
 
   if (decision.need_item || shouldForceItemLookup) {
     try {
       const item = await fetch_ml_item.invoke({ item_id: question.item_id });
-      itemContext = summarizeItemPayload(item);
+      const built = buildListingContextForPrompt(item, itemContextOptions.includeItemSkuInListingContext);
+      itemContext = built.listingContext;
+      resolved_sku = built.sku;
       used_item_context = true;
     } catch (error) {
       item_context_error = error instanceof Error ? error.message : String(error);
       console.warn(`[agent_questions] item fetch failed for ${question.item_id}: ${item_context_error}`);
       if (asksMoreUnits) {
-        return toHumanHandoff(question, "more_units_item_not_found", false, item_context_error);
+        return toHumanHandoff(question, "more_units_item_not_found", false, item_context_error, "");
       }
       handoff_reason = "item_context_fetch_failed";
     }
   }
 
   if (!itemContext && shouldForceItemLookup && !asksMoreUnits) {
-    return toHumanHandoff(question, handoff_reason ?? "specific_info_not_grounded_in_listing", false, item_context_error);
+    return toHumanHandoff(question, handoff_reason ?? "specific_info_not_grounded_in_listing", false, item_context_error, "");
   }
 
   const model = getChatModel(0.4);
 
-  const prompt = buildPrompt(rules, question, itemContext);
+  const prompt = buildPrompt(rules, question, itemContext, resolved_sku);
   const log = getAgentRunLogger();
   const result = log
     ? await log.withLlmStep(
@@ -243,7 +279,8 @@ const draftAnswer = async (question: MercadoLivreQuestion, rules: string): Promi
       question,
       asksMoreUnits ? "more_units_requires_human" : "missing_listing_information_requires_human",
       used_item_context,
-      item_context_error
+      item_context_error,
+      resolved_sku
     );
   }
 
@@ -251,6 +288,7 @@ const draftAnswer = async (question: MercadoLivreQuestion, rules: string): Promi
     question,
     answer,
     used_item_context,
+    sku: resolved_sku,
     item_context_error,
     ...(handoff_reason ? { handoff_reason } : {})
   };
@@ -343,7 +381,8 @@ export const runAgentQuestionsWithResult = async (
     {
       dryRun: Boolean(options.dryRun),
       persist: options.persist !== false,
-      limit: options.limit ?? null
+      limit: options.limit ?? null,
+      includeItemSkuInListingContext: options.includeItemSkuInListingContext !== false
     },
     async (log) => {
       const rulesPath = path.join(__dirname, "RULES.md");
@@ -375,11 +414,12 @@ export const runAgentQuestionsWithResult = async (
       }
 
       const draftedAnswers: Array<DraftedAnswer & DraftAnswerMeta> = [];
+      const itemSkuInContext = options.includeItemSkuInListingContext !== false;
 
       for (const question of selected) {
         const drafted = await log.withStep(
           "draft_answer_question",
-          () => draftAnswer(question, rules),
+          () => draftAnswer(question, rules, { includeItemSkuInListingContext: itemSkuInContext }),
           { questionId: question.id, itemId: question.item_id }
         );
         draftedAnswers.push(drafted);
@@ -392,16 +432,19 @@ export const runAgentQuestionsWithResult = async (
         run_at: new Date().toISOString(),
         source_payload_path: payloadPathForLog,
         total_answers: draftedAnswers.length,
-        answers: draftedAnswers.map(({ question, answer, used_item_context, item_context_error, handoff_reason }) => ({
-          question_id: question.id,
-          item_id: question.item_id,
-          status: question.status,
-          question_text: question.text,
-          used_item_context,
-          ...(item_context_error ? { item_context_error } : {}),
-          ...(handoff_reason ? { handoff_reason } : {}),
-          answer
-        }))
+        answers: draftedAnswers.map(
+          ({ question, answer, used_item_context, sku, item_context_error, handoff_reason }) => ({
+            question_id: question.id,
+            item_id: question.item_id,
+            sku,
+            status: question.status,
+            question_text: question.text,
+            used_item_context,
+            ...(item_context_error ? { item_context_error } : {}),
+            ...(handoff_reason ? { handoff_reason } : {}),
+            answer
+          })
+        )
       };
 
       const persist = options.persist !== false;

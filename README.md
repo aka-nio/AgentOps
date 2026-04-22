@@ -20,7 +20,11 @@ A Fastify REST API that acts as the intermediate layer between agents/clients an
 |--------|------|-------------|
 | `POST` | `/api/external-auth/token` | Authenticate against upstream auth, returns JWT |
 | `GET` | `/api/mercado-livre/questions` | Fetch unanswered seller questions from Mercado Livre |
-| `GET` | `/api/mercado-livre/seller-promotions` | List seller promotion invitations (all types; optional `promotion_type` filter) |
+| `GET` | `/api/mercado-livre/seller-promotions` | List seller promotion invitations (optional `promotion_type` filter) |
+| `GET` | `/api/mercado-livre/seller-promotions/:promotionId` | Promotion detail (`promotion_type` query required) |
+| `GET` | `/api/mercado-livre/seller-promotions/:promotionId/items` | Items in a promotion (`promotion_type` required; optional filters) |
+| `GET` | `/api/mercado-livre/seller-promotions/items/:itemId` | Per-listing promotion state |
+| `GET` | `/api/mercado-livre/seller-promotions/candidates/:candidateId` | Candidate resource by id |
 
 See [`ml_intermediate_api/docs/API/`](ml_intermediate_api/docs/API/) for full endpoint documentation.
 

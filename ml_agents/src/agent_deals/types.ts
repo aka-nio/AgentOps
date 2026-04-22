@@ -24,3 +24,14 @@ export const SellerPromotionsListResponseSchema = z.object({
 });
 
 export type SellerPromotionsListResponse = z.infer<typeof SellerPromotionsListResponseSchema>;
+
+/** Result of resolving SKU(s) from a listing (anúncio) id via the items API. */
+export const ItemSkuByAnuncioResultSchema = z.object({
+  anuncio_id: z.string(),
+  item_id: z.string(),
+  skus: z.array(z.string()),
+  /** True when the item was returned but no SKU could be read from the payload */
+  sku_not_found: z.boolean()
+});
+
+export type ItemSkuByAnuncioResult = z.infer<typeof ItemSkuByAnuncioResultSchema>;

@@ -39,6 +39,7 @@ type CompletedResult = {
     answers: Array<{
       question_id: number;
       item_id: string;
+      sku: string;
       status: string;
       question_text: string;
       used_item_context: boolean;
@@ -241,7 +242,12 @@ export default function AgentQuestionsPage() {
                 <li key={a.question_id} className="answer-card">
                   <div className="answer-meta">
                     <span className="mono">Q{a.question_id}</span>
-                    <span className="mono">{a.item_id}</span>
+                    <div className="answer-item-ids">
+                      <span className="mono">{a.item_id}</span>
+                      <span className="mono muted small">
+                        sku: {a.sku ?? ""}
+                      </span>
+                    </div>
                     {a.used_item_context ? <span className="pill">item context</span> : null}
                     {a.item_context_error ? (
                       <span className="pill pill-warn" title={a.item_context_error}>

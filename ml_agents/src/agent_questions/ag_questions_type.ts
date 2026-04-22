@@ -16,6 +16,8 @@ export type DraftedAnswer = {
 export type AnswerRunEntry = {
   question_id: number;
   item_id: string;
+  /** Seller SKU from the listing item payload when fetched; empty string if unknown or not on payload. */
+  sku: string;
   status: MercadoLivreQuestion["status"];
   question_text: string;
   used_item_context: boolean;
@@ -44,6 +46,8 @@ export type ItemContextDecision = z.infer<typeof ItemContextDecisionSchema>;
 
 export type DraftAnswerMeta = {
   used_item_context: boolean;
+  /** Resolved seller SKU(s), comma-separated; blank when not available. */
+  sku: string;
   item_context_error?: string;
   handoff_reason?: string;
 };
@@ -56,6 +60,11 @@ export type RunAgentQuestionsOptions = {
   payloadPath?: string;
   /** When false, skips writing `outputs/answers-created.json` and history (default true). */
   persist?: boolean;
+  /**
+   * When item context is loaded for a question, also append resolved seller SKU line(s) from the item
+   * payload (default true). The LangGraph orchestrator sets this explicitly when running the questions node.
+   */
+  includeItemSkuInListingContext?: boolean;
 };
 
 export type AgentQuestionsDryRunResult = {

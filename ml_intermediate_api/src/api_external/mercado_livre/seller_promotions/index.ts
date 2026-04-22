@@ -1,18 +1,8 @@
-import https from "node:https";
+import { mercadoLivreGetJson } from "./http.js";
 import {
   sellerPromotionsListResponseSchema,
   type SellerPromotionsListResponse
 } from "./types.js";
-
-const ML_API_BASE_URL = "https://api.mercadolibre.com";
-
-function getEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required environment variable ${name}`);
-  }
-  return value;
-}
 
 /**
  * Lists all promotion invitations for the seller (DEAL, MARKETPLACE_CAMPAIGN, VOLUME, etc.).
@@ -21,48 +11,61 @@ function getEnv(name: string): string {
 export async function listSellerPromotionsForUser(
   userId: string
 ): Promise<SellerPromotionsListResponse> {
-  const accessToken = getEnv("ML_TOKEN_SECRET");
-
-  const url = new URL(`${ML_API_BASE_URL}/seller-promotions/users/${encodeURIComponent(userId)}`);
-  url.searchParams.set("app_version", "v2");
-
-  const responseBody = await new Promise<string>((resolve, reject) => {
-    const req = https.request(
-      url,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${accessToken}`
-        }
-      },
-      (res) => {
-        const statusCode = res.statusCode ?? 0;
-        const chunks: Buffer[] = [];
-
-        res.on("data", (chunk) => {
-          chunks.push(chunk);
-        });
-
-        res.on("end", () => {
-          const body = Buffer.concat(chunks).toString("utf8");
-          if (statusCode >= 200 && statusCode < 300) {
-            resolve(body);
-          } else {
-            reject(
-              new Error(`Mercado Libre API error: ${statusCode} - ${body.slice(0, 500)}`)
-            );
-          }
-        });
-      }
-    );
-
-    req.on("error", (err) => {
-      reject(err);
-    });
-
-    req.end();
-  });
-
-  const json = JSON.parse(responseBody) as unknown;
+  const json = await mercadoLivreGetJson(
+    `/seller-promotions/users/${encodeURIComponent(userId)}`,
+    {}
+  );
   return sellerPromotionsListResponseSchema.parse(json);
+}
+
+/** GET /seller-promotions/promotions/{id}?promotion_type=... */
+export async function getSellerPromotionDetail(
+  promotionId: string,
+  promotionType: string
+): Promise<unknown> {
+  return mercadoLivreGetJson(`/seller-promotions/promotions/${encodeURIComponent(promotionId)}`, {
+    promotion_type: promotionType
+  });
+}
+
+export type SellerPromotionItemsQuery = {
+  promotion_type: string;
+  status?: string;
+  status_item?: string;
+  item_id?: string;
+  limit?: string;
+  offset?: string;
+  search_after?: string;
+};
+
+/** GET /seller-promotions/promotions/{id}/items?promotion_type=...&... */
+export async function getSellerPromotionItems(
+  promotionId: string,
+  params: SellerPromotionItemsQuery
+): Promise<unknown> {
+  return mercadoLivreGetJson(
+    `/seller-promotions/promotions/${encodeURIComponent(promotionId)}/items`,
+    {
+      promotion_type: params.promotion_type,
+      status: params.status,
+      status_item: params.status_item,
+      item_id: params.item_id,
+      limit: params.limit,
+      offset: params.offset,
+      search_after: params.search_after
+    }
+  );
+}
+
+/** GET /seller-promotions/items/{itemId} */
+export async function getSellerItemPromotionState(itemId: string): Promise<unknown> {
+  return mercadoLivreGetJson(`/seller-promotions/items/${encodeURIComponent(itemId)}`, {});
+}
+
+/** GET /seller-promotions/candidates/{candidateId} */
+export async function getSellerPromotionCandidate(candidateId: string): Promise<unknown> {
+  return mercadoLivreGetJson(
+    `/seller-promotions/candidates/${encodeURIComponent(candidateId)}`,
+    {}
+  );
 }
