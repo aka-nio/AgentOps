@@ -14,6 +14,7 @@ This document explains how to run and validate the `agent_questions` implementat
 - when needed, fetch item details via `fetch_ml_item` (`/api/mercado-livre/items/:itemId` on the proxy)
 - generate suggested answers with OpenAI `gpt-4o-mini`
 - save JSON tracking files for latest run and history
+- leave selected cases to human handoff (blank answer), including freight questions, missing listing-grounded specifics, and quantity requests when item lookup fails
 
 ## Relevant Files
 
@@ -111,6 +112,7 @@ Each answer entry includes:
 
 - `used_item_context`: whether listing data was fetched and injected into the prompt
 - `item_context_error` (optional): populated if the item fetch failed
+- `handoff_reason` (optional): why the answer was intentionally left blank for human handling
 
 ## How runs are triggered (and what shows in logs)
 

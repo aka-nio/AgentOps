@@ -43,6 +43,7 @@ type CompletedResult = {
       question_text: string;
       used_item_context: boolean;
       item_context_error?: string;
+      handoff_reason?: string;
       answer: string;
     }>;
   };
@@ -50,6 +51,23 @@ type CompletedResult = {
 };
 
 type RunResponse = DryRunResult | CompletedResult;
+
+const handoffReasonLabel = (reason?: string): string | null => {
+  if (!reason) {
+    return null;
+  }
+
+  const labels: Record<string, string> = {
+    freight_question_human_required: "human handoff: freight",
+    more_units_item_not_found: "human handoff: item lookup failed",
+    more_units_requires_human: "human handoff: more units",
+    missing_listing_information_requires_human: "human handoff: missing listing info",
+    specific_info_not_grounded_in_listing: "human handoff: not in listing",
+    item_context_fetch_failed: "human handoff: item context fetch failed"
+  };
+
+  return labels[reason] ?? `human handoff: ${reason}`;
+};
 
 const parseLimit = (raw: string): number | undefined => {
   const t = raw.trim();
@@ -230,9 +248,14 @@ export default function AgentQuestionsPage() {
                         item fetch issue
                       </span>
                     ) : null}
+                    {a.handoff_reason ? (
+                      <span className="pill pill-handoff" title={a.handoff_reason}>
+                        {handoffReasonLabel(a.handoff_reason)}
+                      </span>
+                    ) : null}
                   </div>
                   <p className="answer-q">{a.question_text || "(empty)"}</p>
-                  <p className="answer-a">{a.answer}</p>
+                  <p className="answer-a">{a.answer || "(blank) — sent to human agent"}</p>
                 </li>
               ))}
             </ul>

@@ -20,6 +20,7 @@ export type AnswerRunEntry = {
   question_text: string;
   used_item_context: boolean;
   item_context_error?: string;
+  handoff_reason?: string;
   answer: string;
 };
 
@@ -44,6 +45,7 @@ export type ItemContextDecision = z.infer<typeof ItemContextDecisionSchema>;
 export type DraftAnswerMeta = {
   used_item_context: boolean;
   item_context_error?: string;
+  handoff_reason?: string;
 };
 
 export type RunAgentQuestionsOptions = {

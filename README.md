@@ -113,4 +113,4 @@ Each subproject still has its own environment variables and Docker setup details
 
 - [`ml_intermediate_api/README.md`](ml_intermediate_api/README.md)
 - [`ml_agents/README.md`](ml_agents/README.md)
-- [`ml_agents/frontTest/README.md`](ml_agents/frontTest/README.md)
+- [`ml_agents/docs/frontTest/README.md`](ml_agents/docs/frontTest/README.md)

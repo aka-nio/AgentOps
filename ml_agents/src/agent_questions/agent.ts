@@ -46,13 +46,15 @@ const buildPrompt = (rules: string, question: MercadoLivreQuestion, itemContext?
     "Task:",
     "Draft a suggested seller reply to the Mercado Livre customer question below.",
     "Return ONLY the final answer text (no headings, no markdown fences).",
+    'If this should be handled by a human agent, return EXACTLY "__HUMAN_AGENT__" and nothing else.',
     "",
     itemContext
       ? [
           "Listing context (from our proxy; may be partial):",
           itemContext,
           "",
-          "Use ONLY facts supported by the listing context above. If something is not present, do not invent it."
+          "Use ONLY facts supported by the listing context above. If something is not present, do not invent it.",
+          'If the customer asks for specific details that are NOT present in listing context, return "__HUMAN_AGENT__".'
         ].join("\n")
       : "",
     "",
@@ -64,6 +66,26 @@ const buildPrompt = (rules: string, question: MercadoLivreQuestion, itemContext?
     `- date_created: ${question.date_created}`
   ].join("\n");
 };
+
+const FREIGHT_QUESTION_RE =
+  /\b(frete|envio|entrega|shipping|prazo de entrega|tempo de entrega|valor do frete|custo do frete)\b/i;
+const MORE_UNITS_QUESTION_RE =
+  /\b(mais unidades?|mais pecas?|mais peças?|quantidade|atacado|lote|kit com|tem mais|consegue mais|maior quantidade)\b/i;
+const SPECIFIC_INFO_QUESTION_RE =
+  /\b(dimens(?:ao|ão|oes|ões)|medida|tamanho|peso|material|voltagem|amperagem|potencia|potência|compat[ií]vel|modelo|sku|garantia|desempenho|especifica[cç][aã]o|detalhe t[ée]cnico)\b/i;
+
+const toHumanHandoff = (
+  question: MercadoLivreQuestion,
+  reason: string,
+  used_item_context = false,
+  item_context_error?: string
+): DraftedAnswer & DraftAnswerMeta => ({
+  question,
+  answer: "",
+  used_item_context,
+  ...(item_context_error ? { item_context_error } : {}),
+  handoff_reason: reason
+});
 
 const getChatModel = (temperature: number): ChatOpenAI => {
   if (!env.OPENAI_API_KEY) {
@@ -166,13 +188,22 @@ const summarizeItemPayload = (item: MercadoLivreItemPayload): string => {
 };
 
 const draftAnswer = async (question: MercadoLivreQuestion, rules: string): Promise<DraftedAnswer & DraftAnswerMeta> => {
+  const normalizedQuestionText = (question.text ?? "").trim();
+  if (FREIGHT_QUESTION_RE.test(normalizedQuestionText)) {
+    return toHumanHandoff(question, "freight_question_human_required");
+  }
+
+  const asksMoreUnits = MORE_UNITS_QUESTION_RE.test(normalizedQuestionText);
   const decision = await decideNeedItemContext(question);
 
   let itemContext: string | undefined;
   let used_item_context = false;
   let item_context_error: string | undefined;
+  let handoff_reason: string | undefined;
 
-  if (decision.need_item) {
+  const shouldForceItemLookup = asksMoreUnits || SPECIFIC_INFO_QUESTION_RE.test(normalizedQuestionText);
+
+  if (decision.need_item || shouldForceItemLookup) {
     try {
       const item = await fetch_ml_item.invoke({ item_id: question.item_id });
       itemContext = summarizeItemPayload(item);
@@ -180,7 +211,15 @@ const draftAnswer = async (question: MercadoLivreQuestion, rules: string): Promi
     } catch (error) {
       item_context_error = error instanceof Error ? error.message : String(error);
       console.warn(`[agent_questions] item fetch failed for ${question.item_id}: ${item_context_error}`);
+      if (asksMoreUnits) {
+        return toHumanHandoff(question, "more_units_item_not_found", false, item_context_error);
+      }
+      handoff_reason = "item_context_fetch_failed";
     }
+  }
+
+  if (!itemContext && shouldForceItemLookup && !asksMoreUnits) {
+    return toHumanHandoff(question, handoff_reason ?? "specific_info_not_grounded_in_listing", false, item_context_error);
   }
 
   const model = getChatModel(0.4);
@@ -198,12 +237,22 @@ const draftAnswer = async (question: MercadoLivreQuestion, rules: string): Promi
       )
     : await model.invoke(prompt);
   const content = typeof result.content === "string" ? result.content : JSON.stringify(result.content);
+  const answer = content.trim();
+  if (answer === "__HUMAN_AGENT__") {
+    return toHumanHandoff(
+      question,
+      asksMoreUnits ? "more_units_requires_human" : "missing_listing_information_requires_human",
+      used_item_context,
+      item_context_error
+    );
+  }
 
   return {
     question,
-    answer: content.trim(),
+    answer,
     used_item_context,
-    item_context_error
+    item_context_error,
+    ...(handoff_reason ? { handoff_reason } : {})
   };
 };
 
@@ -343,13 +392,14 @@ export const runAgentQuestionsWithResult = async (
         run_at: new Date().toISOString(),
         source_payload_path: payloadPathForLog,
         total_answers: draftedAnswers.length,
-        answers: draftedAnswers.map(({ question, answer, used_item_context, item_context_error }) => ({
+        answers: draftedAnswers.map(({ question, answer, used_item_context, item_context_error, handoff_reason }) => ({
           question_id: question.id,
           item_id: question.item_id,
           status: question.status,
           question_text: question.text,
           used_item_context,
           ...(item_context_error ? { item_context_error } : {}),
+          ...(handoff_reason ? { handoff_reason } : {}),
           answer
         }))
       };

@@ -45,6 +45,13 @@ const sendJson = (res: ServerResponse, statusCode: number, payload: unknown): vo
   res.end(JSON.stringify(payload));
 };
 
+const runOrchestrator = async (input: string) =>
+  withAgentRunLog(
+    "graph_invoke",
+    { inputLength: input.length, input_preview: input.slice(0, 240), source: "http" },
+    async (log) => invokeAgentGraphWithTelemetry(input, log)
+  );
+
 const server = createServer(async (req, res) => {
   try {
     if (!req.url || !req.method) {
@@ -59,13 +66,9 @@ const server = createServer(async (req, res) => {
       });
     }
 
-    if (req.method === "POST" && req.url === "/invoke") {
+    if (req.method === "POST" && (req.url === "/invoke" || req.url === "/orchestrator/run")) {
       const body = await parseJsonBody(req, invokeSchema);
-      const result = await withAgentRunLog(
-        "graph_invoke",
-        { inputLength: body.input.length, input_preview: body.input.slice(0, 240) },
-        async (log) => invokeAgentGraphWithTelemetry(body.input, log)
-      );
+      const result = await runOrchestrator(body.input);
       return sendJson(res, 200, {
         runId: result.runId,
         output: result.output,
