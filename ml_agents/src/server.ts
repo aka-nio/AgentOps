@@ -28,7 +28,9 @@ const agentQuestionsRunSchema = z.object({
 
 const agentDealsRunSchema = z.object({
   dryRun: z.boolean().optional(),
-  promotionType: z.string().max(64).optional()
+  promotionType: z.string().max(64).optional(),
+  /** When set (and OPENAI_API_KEY is configured), runs the tool-calling deals agent with all promotion endpoints. */
+  userMessage: z.string().max(8_000).optional()
 });
 
 const parseJsonBody = async <T>(
@@ -107,7 +109,8 @@ const server = createServer(async (req, res) => {
       const body = await parseJsonBody(req, agentDealsRunSchema);
       const result = await runAgentDealsWithResult({
         dryRun: body.dryRun ?? false,
-        promotionType: body.promotionType
+        promotionType: body.promotionType,
+        userMessage: body.userMessage
       });
       return sendJson(res, 200, result);
     }

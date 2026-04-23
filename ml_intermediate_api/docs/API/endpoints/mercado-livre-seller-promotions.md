@@ -64,6 +64,11 @@ No required query parameters.
 
 Resolves a candidate resource (e.g. after a notification). No required query.
 
+## Validation and edge cases (this gateway)
+
+- **`GET .../seller-promotions/:promotionId`** and **`GET .../seller-promotions/:promotionId/items`**: if query **`promotion_type`** is missing or blank → **400** with message describing the requirement.
+- **`GET .../seller-promotions/:promotionId`** (detail only): if `:promotionId` is the literal path segment `items` or `candidates` (would conflict with static routes) → **404** (defensive; normal promotion ids use values like `P-MLB…`).
+
 ## Error mapping
 
 Same as other Mercado Livre proxies: configuration / 401 / 403 / generic upstream → `500` / `401` / `403` / `502`.

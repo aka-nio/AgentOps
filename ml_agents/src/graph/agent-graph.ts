@@ -4,7 +4,7 @@ import { runAgentRetrieverWithResult } from "../agent_retriever/agent.js";
 import { runAgentQuestionsWithResult } from "../agent_questions/agent.js";
 import type { AgentQuestionsRunResult } from "../agent_questions/agent.js";
 import { runAgentDealsWithResult } from "../agent_deals/agent.js";
-import type { AgentDealsRunResult } from "../agent_deals/agent.js";
+import type { AgentDealsRunMetrics, AgentDealsRunResult } from "../agent_deals/agent.js";
 import { formatUnknownErrorForLog } from "../agent_deals/diagnostics.js";
 import { fetch_ml_sku_by_anuncio_id } from "../agent_deals/tools/context_item_sku.js";
 import { env } from "../config/env.js";
@@ -29,7 +29,7 @@ const ORCHESTRATOR_SYSTEM = [
   "Routes:",
   "- agent_retriever: Fetch UNANSWERED Mercado Livre buyer questions and write unanswered-questions.json.",
   "- agent_questions: Draft seller replies from unanswered-questions.json (requires OPENAI_API_KEY).",
-  "- agent_deals: List promotion invitations for the seller (Mercado Livre seller-promotions) and write seller-promotions.json.",
+  "- agent_deals: For Mercado Livre **campaigns / promotions**, including **finding which promotions include a given seller/internal SKU** (tool `find_promotions_for_seller_sku`), or listing campaigns, details, items, per-item state, candidate — via seller-promotion + items APIs. The deals agent uses tools and your message; result is written to seller-promotions.json.",
   "- fetch_item_sku: Look up seller SKU(s) for one listing (anúncio) by item id (MLB…/MLA…) via the proxy items API. Set `anuncio_id` when the id is explicit; otherwise it can be inferred from the message or from item lines in the trace (e.g. question lines with item_id).",
   "- vector_search: Semantic search over the MongoDB Atlas vector index.",
   "- help: One-shot explanation of capabilities (only when trace is still empty and the user asks what you can do).",
@@ -45,9 +45,9 @@ const ORCHESTRATOR_SYSTEM = [
   "- After `[agent_questions] ok` or questions dry_run in trace, choose **done**.",
   "- If trace shows `[agent_retriever] dry_run`, choose **done** (nothing was written for questions to consume).",
   "- If the user only wanted vector search and trace shows vector results, choose **done**.",
-  "- If the user asked for **promotions/deals/campaigns** to join, use **agent_deals**; after `[agent_deals] ok` or dry_run in trace, choose **done**.",
-  "- For agent_deals you may set `promotion_type` (e.g. \"DEAL\") to filter; omit to list every invitation type.",
-  "- If the user asks for **SKU / seller code / código do anúncio** for a listing, or the request implies item context (listing id in the message or trace), use **fetch_item_sku** with `anuncio_id` when you can read an `ML*…` id. After `[fetch_item_sku] ok` or failed in trace, choose **done** unless they also asked for retriever/questions/deals in the same run and those are not finished yet.",
+  "- If the user asked for **promotions/deals/campaigns** to join, or **which promotions include SKU X** / \"promoções com o código …\", use **agent_deals**; after `[agent_deals] ok` or dry_run in trace, choose **done**.",
+  "- For agent_deals you may set `promotion_type` as a **hint** (e.g. filter list) or omit; the deals agent can call list, the SKU-matching tool, detail, items, or item-level promotion APIs as needed for the user message.",
+  "- If the user asks for **SKU / seller code** for a **specific listing** (anúncio) by `ML*…` id, use **fetch_item_sku** with `anuncio_id` — not when they want **promotions filtered by SKU** (that is **agent_deals**). After `[fetch_item_sku] ok` or failed in trace, choose **done** unless they also asked for retriever/questions/deals in the same run and those are not finished yet.",
   "- Multi-step example: retriever → questions → **fetch_item_sku** when the user wants drafts **and** the SKU for a specific `anuncio_id` (set `anuncio_id` from their text).",
   "- Extract limit (1–25) or dry_run only when clearly requested.",
   "- For vector_search, you may set vector_k (1–20).",
@@ -109,6 +109,17 @@ const decideWithLlm = async (state: {
   }
 };
 
+const formatDealsRunMetrics = (m: AgentDealsRunMetrics | undefined): string => {
+  if (!m) {
+    return "";
+  }
+  const t = m.llm_tokens;
+  if (t.interactions > 0) {
+    return `\nmetrics: ${m.duration_ms}ms | LLM prompt=${t.prompt} completion=${t.completion} total=${t.total} (${t.interactions} invoke(s))`;
+  }
+  return `\nmetrics: ${m.duration_ms}ms | no LLM`;
+};
+
 const formatDealsRun = (result: AgentDealsRunResult): string => {
   if (result.mode === "dry_run") {
     const lines = result.sample.map(
@@ -116,17 +127,44 @@ const formatDealsRun = (result: AgentDealsRunResult): string => {
     );
     return [
       `[agent_deals] dry_run: would list ${result.would_list} row(s) filter=${result.promotion_type_filter ?? "none"}`,
-      ...lines
+      ...lines,
+      formatDealsRunMetrics(result.run_metrics)
     ].join("\n");
   }
-  const { response } = result;
+  const { response, artifacts, output_path } = result;
+  if (artifacts.mode === "llm_tools") {
+    const toolNames = artifacts.tool_trace.map((t) => t.name).join(", ");
+    const listHead =
+      response.results.length > 0
+        ? [
+            `list snapshot: ${response.results.length} invitation(s)`,
+            ...response.results.slice(0, 12).map(
+              (p) =>
+                `- ${p.id} type=${p.type} status=${p.status}` +
+                (typeof p.name === "string" ? ` name=${p.name}` : "")
+            )
+          ].join("\n")
+        : "list tool not used or no rows returned.";
+    return [
+      "[agent_deals] (tool-calling)",
+      `tools called: ${toolNames || "(none)"}`,
+      "",
+      "Assistant:",
+      artifacts.final_assistant_text.slice(0, 6_000),
+      "",
+      listHead,
+      "",
+      `written: ${output_path}`,
+      formatDealsRunMetrics(result.run_metrics)
+    ].join("\n");
+  }
   const head = `${response.results.length} promotion(s)`;
   const lines = response.results.map(
     (p) =>
       `- ${p.id} type=${p.type} status=${p.status}` +
       (typeof p.name === "string" ? ` name=${p.name}` : "")
   );
-  return [head, ...lines, `written: ${result.output_path}`].join("\n");
+  return [head, ...lines, `written: ${output_path}`, formatDealsRunMetrics(result.run_metrics)].join("\n");
 };
 
 const resolveAnuncioIdForSkuFetch = (
@@ -356,13 +394,16 @@ const nodeDeals = async (
     try {
       const result = await runAgentDealsWithResult({
         promotionType: promotion_type,
-        dryRun: Boolean(dry_run)
+        dryRun: Boolean(dry_run),
+        userMessage: state.input
       });
       const body = `${formatDealsRun(result)}\n(${state.orchestration.reason})`;
       const traceLine =
         result.mode === "dry_run"
           ? `[agent_deals] dry_run would_list=${result.would_list}`
-          : `[agent_deals] ok count=${result.response.results.length} path=${result.output_path}`;
+          : result.artifacts.mode === "llm_tools"
+            ? `[agent_deals] ok tools=${result.artifacts.tool_trace.length} list_rows=${result.response.results.length} path=${result.output_path}`
+            : `[agent_deals] ok count=${result.response.results.length} path=${result.output_path}`;
       return { output: body, trace: [traceLine] };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);

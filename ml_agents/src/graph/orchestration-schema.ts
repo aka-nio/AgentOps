@@ -117,6 +117,18 @@ export const inferRouteFromHeuristics = (input: string, trace: readonly string[]
     return { route: "help", reason: "heuristic: help or very short message" };
   }
 
+  if (
+    /\b(promo(ç|c)(ão|ões)|promotions?|deals?|campanhas?|ofertas?|convites?|seller[- ]?promo|central de promo)\b/i.test(
+      t
+    ) &&
+    (/\b(sku|c(ó|o)digo|interno)\b/i.test(t) || /sku\s*[:=]?\s*[\w.-]+/i.test(input))
+  ) {
+    return {
+      route: "agent_deals",
+      reason: "heuristic: promotions or campaigns with a seller SKU (deals agent uses find_promotions_for_seller_sku)"
+    };
+  }
+
   {
     const id = extractMercadoLivreItemIdFromText(input);
     if (
@@ -142,8 +154,10 @@ export const inferRouteFromHeuristics = (input: string, trace: readonly string[]
   }
 
   if (
-    /\b(list|listar|show|mostrar|available|dispon(í|i)ve|quais|what)\b/i.test(t) &&
-    /\b(promo(ç|c)(ã|a)ões|promotions?|deals?|campanhas?|ofertas?|convites?|seller[- ]?promo|central de promo)\b/i.test(
+    /\b(list|listar|liste|listem|show|mostrar|available|dispon(í|i)ve|quais|what|buscar?|busque|encontr|todas|todos)\b/i.test(
+      t
+    ) &&
+    /\b(promo(ç|c)(ão|ões)|promotions?|deals?|campanhas?|ofertas?|convites?|seller[- ]?promo|central de promo)\b/i.test(
       t
     )
   ) {
@@ -189,10 +203,10 @@ export const ORCHESTRATOR_HELP_TEXT = [
   "3) vector_search — Busca semântica nos embeddings MongoDB Atlas (requer `OPENAI_API_KEY` e índice vetorial configurado).",
   "   Ex.: \"vector search for shipping policy\", \"busca semântica sobre garantia\".",
   "",
-  "4) agent_deals — Lista convites de promoção do vendedor no Mercado Livre (DEAL, campanhas, etc.) via `GET /api/mercado-livre/seller-promotions` e grava `src/agent_deals/outputs/seller-promotions.json`.",
-  "   Ex.: \"list available promotions\", \"listar campanhas que posso participar\", \"quais promoções posso participar\".",
+  "4) agent_deals — Usa o agente de promoções (com `OPENAI_API_KEY`) para decidir quais endpoints chamar: lista de convites, **filtrar campanhas por SKU do vendedor** (`find_promotions_for_seller_sku`), detalhe da campanha, itens da promoção, estado por anúncio, ou candidato — via proxy em `/api/mercado-livre/seller-promotions/...` e itens. Grava `src/agent_deals/outputs/seller-promotions.json`.",
+  "   Ex.: \"list available promotions\", \"busque promoções com o sku ABC-123\", \"detalhes da promoção P-MLB…\", \"itens na campanha SMART\", \"quais promoções posso participar\".",
   "",
-  "4b) fetch_item_sku — Consulta o SKU do vendedor para um anúncio (item id MLB…/MLA…) via `GET /api/mercado-livre/items/:id` no proxy.",
+  "4b) fetch_item_sku — Consulta o SKU do vendedor para um anúncio (item id MLB…/MLA…) via `GET /api/mercado-livre/items/:id` no proxy (não use para *listar promoções por SKU* — isso é **agent_deals**).",
   "   Ex.: \"qual o SKU do MLB1234567890?\", após rascunhar respostas: \"e o código do anúncio MLB…\" (id pode vir da mensagem ou do rastro com contexto de item).",
   "",
   "5) help — Esta mensagem.",

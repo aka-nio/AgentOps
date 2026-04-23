@@ -29,13 +29,16 @@ npm run start
 
 ## Documentation
 
-- API docs index: `docs/API/README.md`
-- External auth endpoint: `docs/API/endpoints/external-auth.md`
-- Mercado Livre questions endpoint: `docs/API/endpoints/mercado-livre-questions.md`
-- Mercado Livre item endpoint: `docs/API/endpoints/mercado-livre-items.md`
-- Mercado Livre user endpoint: `docs/API/endpoints/mercado-livre-users.md` (`GET /api/mercado-livre/users/:sellerId` — numeric user / seller id; uses `ML_TOKEN_SECRET`)
+- **Index (all routes):** `docs/API/README.md` — includes `/health`, ML Agents **proxy** (`/agent-questions/run`, `/agent-deals/run`, `/invoke`, `/graph-health`), and `/api/...` Mercado Livre + external auth
+- `docs/API/endpoints/server-health.md` — `GET /health`
+- `docs/API/endpoints/ml-agents-upstream-proxy.md` — proxy to ml_agents (`ML_AGENTS_SERVER_URL`)
+- `docs/API/endpoints/external-auth.md` — `POST /api/external-auth/token`
+- `docs/API/endpoints/mercado-livre-questions.md` — `GET /api/mercado-livre/questions`
+- `docs/API/endpoints/mercado-livre-items.md` — `GET /api/mercado-livre/items/:itemId`
+- `docs/API/endpoints/mercado-livre-users.md` — `GET /api/mercado-livre/users/:sellerId` (numeric user / seller id; `ML_TOKEN_SECRET`)
+- `docs/API/endpoints/mercado-livre-seller-promotions.md` — seller promotions (list, detail, items, per-item, candidates)
 
-For a single index of Mercado Livre routes and links to full specs, see `docs/API/README.md`.
+For tables of paths and quick links, use **`docs/API/README.md`**.
 
 ## Prisma version and constraints
 

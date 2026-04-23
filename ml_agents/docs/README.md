@@ -33,6 +33,7 @@ Agent-specific guides (use these paths from the repo root; links work in GitHub 
 - [Agent deals](agent_deals/README.md) — list seller promotion invitations (Mercado Livre seller-promotions)
 - [Orchestrator CLI](orchestrator/README.md) — route and chain retriever/questions/vector operations
 - [Run logs](run_logs/README.md) — JSONL event structure and token telemetry
+- [Token usage & cost](tokens-usage/README.md) — per-agent averages, orchestrator flows, cost notes
 - [frontTest UI](frontTest/README.md) — run and configure the React test client
 
 ## Run logs
