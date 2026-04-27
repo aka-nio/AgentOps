@@ -122,3 +122,9 @@ Each subproject still has its own environment variables and Docker setup details
 - [`ml_intermediate_api/README.md`](ml_intermediate_api/README.md)
 - [`ml_agents/README.md`](ml_agents/README.md)
 - [`ml_agents/docs/frontTest/README.md`](ml_agents/docs/frontTest/README.md)
+
+## License
+
+This project is open source and released under the [MIT License](LICENSE). You may use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the software, including creating your own versions, subject to the conditions in the license file. There is no warranty and no liability for the software or how it is used; people who use or redistribute the code do not owe the authors anything beyond what the license requires.
+
+**Per-file headers:** see [docs/file-header-policy.md](docs/file-header-policy.md) for when to paste the short SPDX + copyright + plain-language block on new or substantially modified source files (templates under [docs/license-headers/](docs/license-headers/)).

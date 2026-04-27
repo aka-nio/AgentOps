@@ -2,6 +2,7 @@
   "name": "ml_intermediate_api",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "nodemon --watch src --ext ts --exec tsx src/server.ts",

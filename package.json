@@ -1,6 +1,7 @@
 {
   "name": "agent-ops-base",
   "private": true,
+  "license": "MIT",
   "packageManager": "npm@11.12.1",
   "workspaces": [
     "ml_agents",
